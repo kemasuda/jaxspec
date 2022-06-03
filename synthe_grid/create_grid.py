@@ -8,12 +8,19 @@ from scipy.interpolate import interp1d
 import pickle
 import vidmapy
 
+filename = sys.argv[1]
+
+if filename[-3:] != "pkl":
+    print ("argument should be synthe_wavmin-wavmax.pkl.")
+
 #%% synthe outputs (see A100)
+"""
 filename = "synthe_5195-5285.pkl"
 filename = "synthe_5355-5445.pkl"
 filename = "synthe_5525-5615.pkl"
 filename = "synthe_6095-6195.pkl"
 filename = "synthe_6205-6265.pkl"
+"""
 
 #%%
 with open(filename, "rb") as f:
