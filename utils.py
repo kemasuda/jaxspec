@@ -2,6 +2,7 @@ __all__ = ["get_beta", "varr_for_kernels", "doppler_shift", "broaden_and_shift"]
 
 import numpy as np
 import jax.numpy as jnp
+from jax import jit
 
 def get_beta(resolution=80000., c0=2.99792458e5):
     return c0 / resolution / 2.354820
@@ -20,7 +21,7 @@ def doppler_shift(xout, xin, yin, v, const_c=2.99792458e5):
 # add varr??
 from rotkernel_ft import rotkernel
 @jit
-def broaden_and_shift(wavout, wav, flux, vsini, zeta, beta, rv, u1=0.5, u2=0.2):
+def broaden_and_shift(wavout, wav, flux, vsini, zeta, beta, rv, varr, u1=0.5, u2=0.2):
     kernel = rotkernel(varr, zeta, vsini, u1, u2, beta, Nt=500)
     bflux = jnp.convolve(flux, kernel, 'same')
     return doppler_shift(wavout, wav, bflux, rv)
