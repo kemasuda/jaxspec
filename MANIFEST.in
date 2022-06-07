@@ -1,0 +1,2 @@
+include src/jaxspec/synthegrid/models.pkl
+include src/jaxspec/synthegrid/model_params.csv
