@@ -59,8 +59,8 @@ def compute_spectra(wmin, wmax):
     return results
 
 def create_grid(wmin, wmax, overwrite=False):
-    path = os.path.join(os.path.dirname(os.path.realpath(__file__)))
-    specfile = path+"/synthe_%d-%d.pkl"%(wmin, wmax)
+    #path = os.path.join(os.path.dirname(os.path.realpath(__file__)))
+    specfile = "synthe_%d-%d.pkl"%(wmin, wmax)
 
     if os.path.exists(specfile) and (not overwrite):
         with open(specfile, "rb") as f:
