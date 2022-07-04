@@ -7,5 +7,7 @@ __email__ = ""
 __license__ = "MIT"
 __description__ = "stellar parameter estimation with jax"
 
-from .synthefit import *
+#from .synthefit import *
+#from .coelhofit import *
 from . import synthegrid
+from . import specfit

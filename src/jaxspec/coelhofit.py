@@ -14,32 +14,26 @@ from jax.config import config
 config.update('jax_enable_x64', True)
 
 #%%
-#"""
 class SpecGrid:
     def __init__(self, path):
-        #if path is None:
-        #    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'synthe_5200-5280_normed.npz')
         self.dgrid = np.load(path)
         self.t0, self.dt = self.dgrid['tgrid'][0], np.diff(self.dgrid['tgrid'])[0]
         self.g0, self.dg = self.dgrid['ggrid'][0], np.diff(self.dgrid['ggrid'])[0]
         self.f0, self.df = self.dgrid['fgrid'][0], np.diff(self.dgrid['fgrid'])[0]
+        self.a0, self.da = self.dgrid['agrid'][0], np.diff(self.dgrid['agrid'])[0]
         self.wavgrid = self.dgrid['wavgrid']
         self.logwavgrid = np.log(self.wavgrid)
         self.wav0, self.dwav = self.wavgrid[0], np.diff(self.wavgrid)[0]
         self.wavmin, self.wavmax = np.min(self.wavgrid), np.max(self.wavgrid)
-        #self.keys = ['flux']
-
-    #def set_keys(self, keys):
-    #    self.keys = keys
 
     @partial(jit, static_argnums=(0,))
-    def values(self, teff, logg, feh, wav):
+    def values(self, teff, logg, feh, alpha, wav):
         tidx = (teff - self.t0) / self.dt
         gidx = (logg - self.g0) / self.dg
         fidx = (feh - self.f0) / self.df
+        aidx = (alpha - self.a0) / self.da
         wavidx = (wav - self.wav0) / self.dwav
-        idxs = [tidx, gidx, fidx, wavidx]
-        #return [mapc(self.dgrid[key], idxs, order=1, cval=-jnp.inf) for key in self.keys]
+        idxs = [tidx, gidx, fidx, aidx, wavidx]
         return mapc(self.dgrid['flux'], idxs, order=1, cval=-jnp.inf)
 
 import celerite2.jax
@@ -62,8 +56,8 @@ class SpecFit:
         self.beta_ip = get_beta(resolution)
 
     def model(self, params, dense=False):
-        c0, c1, teff, logg, feh, vsini, zeta, rv = params[:8]
-        flux_phys = self.sg.values(teff, logg, feh, self.wav)
+        c0, c1, teff, logg, feh, alpha, vsini, zeta, rv = params[:9]
+        flux_phys = self.sg.values(teff, logg, feh, alpha, self.wav)
         if dense:
             wav = self.wav
         else:
@@ -72,8 +66,8 @@ class SpecFit:
         return flux_base * broaden_and_shift(wav, self.wav, flux_phys, vsini, zeta, self.beta_ip, rv, self.varr)
 
     def ldmodel(self, params, dense=False, beta_ip=None):
-        c0, c1, teff, logg, feh, vsini, zeta, rv, u1, u2 = params
-        flux_phys = self.sg.values(teff, logg, feh, self.wav)
+        c0, c1, teff, logg, feh, alpha, vsini, zeta, rv, u1, u2 = params
+        flux_phys = self.sg.values(teff, logg, feh, alpha, self.wav)
         if dense:
             wav = self.wav
         else:
@@ -85,7 +79,7 @@ class SpecFit:
 
     def gpmodel(self, params):
         flux_model = self.model(params)
-        lna, lnc, lnsigma = params[8:]
+        lna, lnc, lnsigma = params[9:]
         kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
         gp = celerite2.jax.GaussianProcess(kernel, mean=flux_model)
         gp.compute(self.wav_obs, diag=self.error_obs**2+jnp.exp(2*lnsigma))
@@ -95,7 +89,7 @@ class SpecFit:
     def objective_gp(self, params):
         flux_model = self.model(params)
 
-        lna, lnc, lnsigma = params[8:]
+        lna, lnc, lnsigma = params[9:]
         kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
         gp = celerite2.jax.GaussianProcess(kernel, mean=flux_model)
         gp.compute(self.wav_obs, diag=self.error_obs**2+jnp.exp(2*lnsigma))
@@ -106,10 +100,10 @@ class SpecFit:
         vsinimin, vsinimax = vsinibounds
         zetamin, zetamax = zetabounds
         rvmin, rvmax = rvbounds
-        pnames = ['c0', 'c1', 'teff', 'logg', 'feh', 'vsini', 'zeta', 'rv', 'lna', 'lnc', 'lnsigma']
-        init_params = jnp.array([1, 0, 5000, 1.5, -0.4, 0.5*vsinimax, 0.5*zetamax, rvmin]+[-3., 0., -5.])
-        params_lower = jnp.array([0.8, -0.1, 3500., 1, -1., vsinimin, zetamin, 0.5*(rvmin+rvmax)]+[-5, -5, -10.])
-        params_upper = jnp.array([1.2, 0.1, 7000, 5, 0.5, vsinimax, zetamax, rvmax]+[0, 1, -5.])
+        pnames = ['c0', 'c1', 'teff', 'logg', 'feh', 'alpha', 'vsini', 'zeta', 'rv', 'lna', 'lnc', 'lnsigma']
+        init_params = jnp.array([1, 0, 5000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, rvmin]+[-3., 0., -5.])
+        params_lower = jnp.array([0.8, -0.1, 3500., 1, -1., 0., vsinimin, zetamin, 0.5*(rvmin+rvmax)]+[-5, -5, -10.])
+        params_upper = jnp.array([1.2, 0.1, 7000, 5, 0.5, 0.4, vsinimax, zetamax, rvmax]+[0, 1, -5.])
         return pnames, init_params, (params_lower, params_upper)
 
     def optim(self, vsinibounds, zetabounds, rvbounds, method='TNC', set_init_params=None):
@@ -164,6 +158,7 @@ class SpecFit:
         teff = numpyro.sample("teff", dist.Uniform(3500, 7000))
         logg = numpyro.sample("logg", dist.Uniform(1, 5.))
         feh = numpyro.sample("feh", dist.Uniform(-1, 0.5))
+        alpha = numpyro.sample("alpha", dist.Uniform(0, 0.4))
         vsini = numpyro.sample("vsini", dist.Uniform(self.vsinibounds[0], self.vsinibounds[1]))
         if fit_zeta:
             zeta = numpyro.sample("zeta", dist.Uniform(self.zetabounds[0], self.zetabounds[1]))
@@ -173,7 +168,6 @@ class SpecFit:
 
         c0 = numpyro.sample("c0", dist.Uniform(0.8, 1.2))
         c1 = numpyro.sample("c1", dist.Uniform(-0.1, 0.1))
-        #flux_model = numpyro.deterministic("flux_model", self.model(jnp.array([c0, c1, teff, logg, feh, vsini, zeta, rv])))
         q1 = numpyro.sample("q1", dist.Uniform(0, 1))
         q2 = numpyro.sample("q2", dist.Uniform(0, 1))
         u1 = numpyro.deterministic("u1", 2*jnp.sqrt(q1)*q2)
@@ -186,7 +180,7 @@ class SpecFit:
         else:
             beta_ip = None
 
-        flux_model = numpyro.deterministic("flux_model", self.ldmodel(jnp.array([c0, c1, teff, logg, feh, vsini, zeta, rv, u1, u2]), beta_ip=beta_ip))
+        flux_model = numpyro.deterministic("flux_model", self.ldmodel(jnp.array([c0, c1, teff, logg, feh, alpha, vsini, zeta, rv, u1, u2]), beta_ip=beta_ip))
 
         lna = numpyro.sample("lna", dist.Uniform(low=-5, high=0))
         lnc = numpyro.sample("lnc", dist.Uniform(low=-5, high=1))
@@ -198,7 +192,7 @@ class SpecFit:
         numpyro.sample("obs", gp.numpyro_dist(), obs=self.flux_obs)
         numpyro.deterministic("flux_gpmodel", gp.predict(self.flux_obs))
 
-        numpyro.deterministic("flux_model_dense", self.ldmodel(jnp.array([c0, c1, teff, logg, feh, vsini, zeta, rv, u1, u2]), dense=True))
+        numpyro.deterministic("flux_model_dense", self.ldmodel(jnp.array([c0, c1, teff, logg, feh, alpha, vsini, zeta, rv, u1, u2]), dense=True))
 
         if loggprior is not None:
             mu, sigma = loggprior
@@ -208,6 +202,7 @@ class SpecFit:
         teff = numpyro.sample("teff", dist.Uniform(3500, 7000))
         logg = numpyro.sample("logg", dist.Uniform(1, 5.))
         feh = numpyro.sample("feh", dist.Uniform(-1, 0.5))
+        alpha = numpyro.sample("alpha", dist.Uniform(0, 0.4))
         vsini = numpyro.sample("vsini", dist.Uniform(self.vsinibounds[0], self.vsinibounds[1]))
         if fit_zeta:
             zeta = numpyro.sample("zeta", dist.Uniform(self.zetabounds[0], self.zetabounds[1]))
@@ -227,7 +222,7 @@ class SpecFit:
         else:
             beta_ip = None
 
-        flux_model = numpyro.deterministic("flux_model", self.ldmodel(jnp.array([1., 0., teff, logg, feh, vsini, zeta, rv, u1, u2]), beta_ip=beta_ip))
+        flux_model = numpyro.deterministic("flux_model", self.ldmodel(jnp.array([1., 0., teff, logg, feh, alpha, vsini, zeta, rv, u1, u2]), beta_ip=beta_ip))
 
         wav = self.wav_obs
         freqorder = 4
@@ -238,7 +233,7 @@ class SpecFit:
         flux_base = X@coeffs + 1.
 
         flux_gpmodel = numpyro.deterministic("flux_gpmodel", flux_model * flux_base)
-        numpyro.deterministic("flux_model_dense", self.ldmodel(jnp.array([1., 0., teff, logg, feh, vsini, zeta, rv, u1, u2]), dense=True))
+        numpyro.deterministic("flux_model_dense", self.ldmodel(jnp.array([1., 0., teff, logg, feh, alpha, vsini, zeta, rv, u1, u2]), dense=True))
 
         lnsigma = numpyro.sample("lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
         error_scale = jnp.sqrt(self.error_obs**2 + jnp.exp(2*lnsigma))
@@ -260,7 +255,7 @@ class SpecFit:
             kernel = numpyro.infer.NUTS(self.npmodel, target_accept_prob=target_accept_prob, init_strategy=init_strategy)
         else:
             kernel = numpyro.infer.NUTS(self.sinemodel, target_accept_prob=target_accept_prob, init_strategy=init_strategy)
-            self.pnames = ['teff', 'logg', 'feh', 'vsini', 'zeta', 'rv', 'lnsigma']
+            self.pnames = ['teff', 'logg', 'feh', 'alpha', 'vsini', 'zeta', 'rv', 'lnsigma']
         mcmc = numpyro.infer.MCMC(kernel, num_warmup=nw, num_samples=ns)
         rng_key = random.PRNGKey(0)
         mcmc.run(rng_key, **kwargs)#fit_zeta=fit_zeta)
