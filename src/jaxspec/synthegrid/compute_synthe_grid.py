@@ -17,13 +17,13 @@ from vidmapy.kurucz.atlas import Atlas
 from vidmapy.kurucz.synthe import Synthe
 from vidmapy.kurucz.parameters import Parameters
 
-def get_atlas_model(teff, logg, feh, vmicro=2.):
+def get_atlas_model(teff, logg, feh, vmicro=1.):
     p = Parameters(teff=teff, logg=logg, metallicity=feh, microturbulence=vmicro)
     return atlas_worker.get_model(p)
 
-def get_synthe_model(teff, logg, feh, wmin, wmax, resolution, vmicro=2.):
-    model = get_atlas_model(teff, logg, feh)
-    p_synthe = Parameters(wave_min=wmin, wave_max=wmax, resolution=resolution, metallicity=feh)
+def get_synthe_model(teff, logg, feh, wmin, wmax, resolution, vmicro=1.):
+    model = get_atlas_model(teff, logg, feh, vmicro=vmicro)
+    p_synthe = Parameters(wave_min=wmin, wave_max=wmax, resolution=resolution, metallicity=feh, microturbulence=vmicro)
     spectrum = synthe_worker.get_spectrum(model, parameters=p_synthe, quiet=False)
     return model, spectrum
 
