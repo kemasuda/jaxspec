@@ -127,5 +127,13 @@ def create_grid(wmin, wmax, overwrite=False):
     print ("spectrum grid saved to %s."%outname)
 
 if __name__ == "__main__":
-    wmin, wmax = int(sys.argv[1]), int(sys.argv[2])
-    create_grid(wmin, wmax)
+    #wmin, wmax = int(sys.argv[1]), int(sys.argv[2])
+    #create_grid(wmin, wmax)
+    """ create grids for IRD H band """
+    import pandas as pd
+    d = pd.read_csv("wavranges_ird_h.csv")
+    for i in range(len(d)):
+        wmin_aa = int(d.iloc[i].wavmin*10) - 5
+        wmax_aa = int(d.iloc[i].wavmax*10) + 5
+        print ("#", wmin_aa, wmax_aa)
+        create_grid(wmin_aa, wmax_aa)
