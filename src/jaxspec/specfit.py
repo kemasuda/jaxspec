@@ -56,7 +56,7 @@ class SpecGridSynthe:
         self.wavmin, self.wavmax = np.min(self.wavgrid), np.max(self.wavgrid)
 
     @partial(jit, static_argnums=(0,))
-    def values(self, teff, logg, feh, wav):
+    def values(self, teff, logg, feh, alpha, wav): # alpha is not in the grid currently
         tidx = (teff - self.t0) / self.dt
         gidx = (logg - self.g0) / self.dg
         fidx = (feh - self.f0) / self.df
@@ -109,9 +109,14 @@ class SpecModel:
 def grid_wavranges_paths(gridpath):
     wavranges_grid, paths = [], []
     for gridfile in glob.glob(gridpath+"*.npz"):
-        pattern = ".*/(\d+-\d+).*"
-        result = re.match(pattern, gridfile)
-        wavranges_grid.append(result.group(1).split("-"))
+        try:
+            pattern = ".*/(\d+-\d+).*"
+            result = re.match(pattern, gridfile)
+            wavranges_grid.append(result.group(1).split("-"))
+        except:
+            pattern = ".*_(\d+-\d+).*"
+            result = re.match(pattern, gridfile)
+            wavranges_grid.append(result.group(1).split("-"))
         paths.append(gridfile)
     wavranges_grid = np.array(wavranges_grid).astype(float)
     return wavranges_grid, paths
@@ -131,7 +136,10 @@ class SpecFit:
             print (gridpath, "found.")
             assert np.min(wobs - wavranges[grididx,0]) > 5
             assert np.min(wavranges[grididx,1] - wobs) > 5
-            sg = SpecGridCoelho(gridpath)
+            if "synthe" in gridpath:
+                sg = SpecGridSynthe(gridpath)
+            elif "coelho" in gridpath:
+                sg = SpecGridCoelho(gridpath)
 
             smlist.append(SpecModel(sg, wobs, fobs, eobs, vmax=vmax))
             wobslist.append(wobs)
@@ -180,11 +188,12 @@ class SpecFit:
         plt.ylabel("normalized CCF")
         plt.axvline(x=ccfrv, label='median: %.1fkm/s'%ccfrv, color='gray', lw=2, alpha=0.4)
         for i, (vg, ccf) in enumerate(zip(vgrids, ccfs)):
-            plt.plot(vg, ccf/np.max(ccf), '-', lw=0.5, label='order %d'%order)
+            plt.plot(vg, ccf/np.max(ccf), '-', lw=0.5, label='order %d'%self.orders[i])
         plt.plot(rvgrid, medccf/np.max(medccf), color='gray', lw=2)
         plt.legend(loc='upper right', bbox_to_anchor=(1.35,1))
         if output_dir is not None:
             plt.savefig(output_dir+"ccfs.png", dpi=200, bbox_inches='tight')
+            plt.close()
 
         dccf = medccf/np.max(medccf) - 0.5
         dccfderiv = dccf[1:] * dccf[:-1]
@@ -267,6 +276,7 @@ class SpecFit:
             plt.legend(loc='lower right')
             if output_dir is not None:
                 plt.savefig(output_dir+"ql_order%02d.png"%order, dpi=200, bbox_inches="tight")
+                plt.close()
 
     def optim_iterate(self, maxitr=5, cut0=5., cut1=3., method="TNC", output_dir=None):
         params_opt = None
@@ -313,7 +323,8 @@ class SpecFit:
                 print ()
                 num_outliers = num_outliers_new
 
-        self.qlplots(params_opt, output_dir=output_dir)
+        if output_dir is not None:
+            self.qlplots(params_opt, output_dir=output_dir)
         self.params_opt = params_opt
         return params_opt
 
@@ -339,6 +350,7 @@ class SpecFit:
             plt.legend(loc='upper right')
             if output_dir is not None:
                 plt.savefig(output_dir+"residual_order%02d.png"%order, dpi=200, bbox_inches="tight")
+                plt.close()
 
     def remove_masked_data(self):
         for sm in self.smlist:
