@@ -233,10 +233,10 @@ class SpecFit:
 
         pnames = ['c0', 'c1', 'teff', 'logg', 'feh', 'alpha', 'vsini', 'zeta', 'wavres', 'rv', 'u1', 'u2', 'lna', 'lnc', 'lnsigma']
         if set_init_params is None:
-            init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, resmin, rvmin, 0, 0]+[-3., 0., -5.])
+            init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, 0.5*(resmin+resmax), rvmean, 0, 0]+[-3., 0., -5.])
         else:
             init_params = set_init_params
-        params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, 0.5*(resmin+resmax), rvmean, 0, 0]+[-5, -5, -10.])
+        params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, resmin, rvmin, 0, 0]+[-5, -5, -10.])
         params_upper = jnp.array([1.2, 0.1, 7000, 5., 0.5, 0.4, vsinimax, zetamax, resmax, rvmax, 0, 0]+[0, 1, -5.])
         bounds = (params_lower, params_upper)
         self.pnames = pnames

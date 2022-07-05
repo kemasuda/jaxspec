@@ -22,8 +22,6 @@ def doppler_shift(xout, xin, yin, v, const_c=2.99792458e5):
     x_shifted = xin * (1. + v/const_c)
     return jnp.interp(xout, x_shifted, yin)
 
-# add varr??
-@jit
 def broaden_and_shift(wavout, wav, flux, vsini, zeta, beta, rv, varr, u1=0.5, u2=0.2):
     kernel = rotkernel(varr, zeta, vsini, u1, u2, beta, Nt=500)
     bflux = jnp.convolve(flux, kernel, 'same')
