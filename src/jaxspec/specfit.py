@@ -221,8 +221,10 @@ class SpecFit:
 
     #def optim(self, vsinimin=0., zetamin=0., zetamax=10., method='TNC', set_init_params=None):
     def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., method='TNC', set_init_params=None):
+        from astropy.stats import sigma_clipped_stats
         vsinimax = self.ccfvbroad
-        rvmean = np.mean(self.ccfrvlist)
+        #rvmean = np.mean(self.ccfrvlist)
+        rvmean = sigma_clipped_stats(self.ccfrvlist)[0]
         if vsinimax < 20:
             rvmin, rvmax = rvmean - 5., rvmean + 5.
         else:
