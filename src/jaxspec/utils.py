@@ -1,8 +1,8 @@
-__all__ = ["get_beta", "varr_for_kernels", "doppler_shift", "broaden_and_shift", "compute_ccf"]
+__all__ = ["get_beta", "varr_for_kernels", "doppler_shift", "broaden_and_shift", "broaden_and_shift_vmap", "broaden_and_shift_vmap_full", "compute_ccf"]
 
 import numpy as np
 import jax.numpy as jnp
-from jax import jit
+from jax import (jit, vmap)
 from .rotkernel_ft import rotkernel
 from scipy.interpolate import interp1d
 from scipy.signal import correlate
@@ -26,6 +26,10 @@ def broaden_and_shift(wavout, wav, flux, vsini, zeta, beta, rv, varr, u1=0.5, u2
     kernel = rotkernel(varr, zeta, vsini, u1, u2, beta, Nt=500)
     bflux = jnp.convolve(flux, kernel, 'same')
     return doppler_shift(wavout, wav, bflux, rv)
+
+# wavout, wav, flux, vsini, zeta, beta, rv, varr, u1, u2
+broaden_and_shift_vmap = vmap(broaden_and_shift, (0,0,0,None,None,None,None,0,None,None), 0)
+broaden_and_shift_vmap_full = vmap(broaden_and_shift, (0,0,0,None,None,0,0,0,None,None), 0)
 
 def compute_ccf(x, y, xmodel, ymodel, mask=None, resolution_factor=5):
     if mask is None:
