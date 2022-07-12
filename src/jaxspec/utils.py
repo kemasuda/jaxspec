@@ -13,8 +13,10 @@ def get_beta(resolution):
 
 def varr_for_kernels(dlogwav, vmax=50, c0=2.99792458e5):
     v_pix = dlogwav * c0
-    pix_max = int(vmax / v_pix)
-    pixs = np.arange(-pix_max, pix_max*1.01, 1)
+    #pix_max = int(vmax / v_pix)
+    pix_max = int(np.round(vmax / v_pix)) # make sure that pix_max is exactly the same for all orders
+    #pixs = np.arange(-pix_max, pix_max*1.01, 1)
+    pixs = np.arange(-pix_max, pix_max+0.1, 1)
     varr = pixs * v_pix
     return varr
 
