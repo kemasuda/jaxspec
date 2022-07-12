@@ -58,7 +58,7 @@ def compute_spectra(wmin, wmax):
 
     return results
 
-def create_grid(wmin, wmax, overwrite=False):
+def create_grid(wmin, wmax, overwrite=False, fixed_wavgrid_length=7500):
     #path = os.path.join(os.path.dirname(os.path.realpath(__file__)))
     specfile = "synthe_%d-%d.pkl"%(wmin, wmax)
 
@@ -103,7 +103,7 @@ def create_grid(wmin, wmax, overwrite=False):
     keys = ['flux']
 
     # linear wavelength grid; should be logarithmic?
-    wavarr = np.linspace(wavgrid[0], wavgrid[-1], len(wavgrid))
+    wavarr = np.linspace(wavgrid[0], wavgrid[-1], fixed_wavgrid_length)
 
     #
     pgrids2d = []
