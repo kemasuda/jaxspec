@@ -58,7 +58,7 @@ def compute_spectra(wmin, wmax):
 
     return results
 
-def create_grid(wmin, wmax, overwrite=False, fixed_wavgrid_length=7500):
+def create_grid(wmin, wmax, overwrite=False, fixed_wavgrid_length=8000):
     #path = os.path.join(os.path.dirname(os.path.realpath(__file__)))
     specfile = "synthe_%d-%d.pkl"%(wmin, wmax)
 
@@ -108,7 +108,7 @@ def create_grid(wmin, wmax, overwrite=False, fixed_wavgrid_length=7500):
     #
     pgrids2d = []
     for key in keys:
-        pgrid2d = np.zeros((len(tgrid), len(ggrid), len(fgrid), len(wavgrid)))
+        pgrid2d = np.zeros((len(tgrid), len(ggrid), len(fgrid), fixed_wavgrid_length))
         for i,t in enumerate(tgrid):
             for j,g in enumerate(ggrid):
                 for k,f in enumerate(fgrid):
