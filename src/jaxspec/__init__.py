@@ -9,5 +9,5 @@ __description__ = "stellar parameter estimation with jax"
 
 #from .synthefit import *
 #from .coelhofit import *
-from . import synthegrid
-from . import specfit
+from . import modelgrid
+#from . import specfit
