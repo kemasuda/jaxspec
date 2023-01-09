@@ -6,7 +6,7 @@ import numpy as np
 import pathlib, os
 from astropy.io import fits
 from scipy.interpolate import interp1d
-from PyAstronomy.pyasl import read1dFitsSpec
+
 
 def air_to_vac(wav_air_aa):
     """ wavelength conersion from air to vacuum following Donald Morton (2000, ApJ. Suppl., 130, 403)
@@ -125,6 +125,7 @@ def compute_grid_coelho(model_params, wmin, wmax, data_dir, output_dir, fixed_wa
 
 
 def compute_grid_ispec(wmin, wmax, data_dir, output_dir, wavgrid_length=5000, air_or_vac="vac"):
+    from PyAstronomy.pyasl import read1dFitsSpec
     """ compute jaxspec grid using the synthetic grid from iSpec """
     print ("# computing spectrum grid for %dAA-%dAA"%(wmin, wmax))
 
