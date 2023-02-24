@@ -51,7 +51,7 @@ class SpecModel:
 
     @partial(jit, static_argnums=(0,))
     def fluxmodel(self, wav_out, params_phys):
-        """ broadened & shifted flux model (including linear continuum)
+        """ broadened & shifted flux model; including a common linear continuum
 
             Args:
                 wav_out: wavelengths where flux values are evaluated
@@ -68,7 +68,20 @@ class SpecModel:
         flux_raw = self.sg.values(teff, logg, feh, alpha, self.wavgrid)
         flux_base = c0 + c1 * (wav_out - jnp.mean(self.wav_obs, axis=1)[:,jnp.newaxis]) / self.wav_obs_range[:,jnp.newaxis]
         flux_phys = flux_base * broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(wavres), rv, self.varr, u1, u2)
+        return flux_phys
 
+    @partial(jit, static_argnums=(0,))
+    def fluxmodel_multiorder(self, c0, c1, teff, logg, feh, alpha, vsini, zeta, res, rv, u1, u2):
+        """ broadened & shifted flux model; including order-dependent linear continua
+
+            Returns:
+                flux model (Norder, Npix) at wav_obs
+
+        """
+        wav_out = self.wav_obs
+        flux_raw = self.sg.values(teff, logg, feh, alpha, self.wavgrid)
+        flux_base = c0[:,jnp.newaxis] + c1[:,jnp.newaxis] * (wav_out - jnp.mean(self.wav_obs, axis=1)[:,jnp.newaxis]) / self.wav_obs_range[:,jnp.newaxis]
+        flux_phys = flux_base * broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(res), rv, self.varr, u1, u2)
         return flux_phys
 
     @partial(jit, static_argnums=(0,))

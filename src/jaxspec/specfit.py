@@ -71,6 +71,7 @@ class SpecFit:
         self.pnames = None
         self.bounds = None
 
+    """
     def add_wavresinfo(self, resfile):
         dres = pd.read_csv(resfile)
         rmin, rmax = [], []
@@ -80,6 +81,13 @@ class SpecFit:
             rmax.append(res.max())
         self.wavresmin = rmin
         self.wavresmax = rmax
+    """
+    def add_wavresinfo(self, res_min, res_max):
+        assert len(res_min) == len(self.orders)
+        assert len(res_max) == len(self.orders)
+        assert np.min(res_max - res_min) >= 0.
+        self.wavresmin = res_min
+        self.wavresmax = res_max
 
     #def ziplist(self):
     #    return zip(self.sm.wav_obs, self.sm.flux_obs, self.sm.error_obs, self.sm.mask_obs, self.orders)
@@ -132,11 +140,11 @@ class SpecFit:
             rvmin, rvmax = rvmean - 0.5*vsinimax, rvmean + 0.5*vsinimax
         self.rvbounds = (rvmin, rvmax)
         zetamin, zetamax = 0, 10.
-        resmin, resmax = np.max(self.wavresmin), np.min(self.wavresmax)
+        resmin, resmax = np.mean(self.wavresmin), np.mean(self.wavresmax)
 
         pnames = ['c0', 'c1', 'teff', 'logg', 'feh', 'alpha', 'vsini', 'zeta', 'wavres', 'rv', 'u1', 'u2', 'lna', 'lnc', 'lnsigma']
         if set_init_params is None:
-            init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, resmin, rvmin, 0, 0]+[-3., 0., --8])
+            init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, resmin, rvmin, 0, 0]+[-3., 0., -8])
         else:
             init_params = set_init_params
         params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, 0.5*(resmin+resmax), rvmean, 0, 0]+[-5, -5, -10.])
@@ -160,12 +168,27 @@ class SpecFit:
         self.params_opt = params
         return params
 
-    def optim_iterate(self, maxiter=10, cut0=5., cut1=3., method="TNC", plot=True, lnsigmamax=-5, **kwargs):
+    def optim_iterate(self, maxiter=10, cut0=5., cut1=3., method="TNC", plot=True, lnsigmamax=-5,
+                    teff_prior=None, logg_prior=None, feh_prior=None, **kwargs):
         params_opt = None
         sm = self.sm
         mask_all = sm.mask_obs + (sm.mask_fit > 0.)
         num_masked = np.sum(mask_all)
-        objective = lambda p: -sm.gp_loglikelihood(p)
+        #objective = lambda p: -sm.gp_loglikelihood(p)
+
+        def objective(p):
+            loglike = self.sm.gp_loglikelihood(p)
+            if teff_prior is not None:
+                mu, sig = teff_prior
+                loglike += -0.5 * (p[2] - mu)**2 / sig**2
+            if logg_prior is not None:
+                mu, sig = logg_prior
+                loglike += -0.5 * (p[3] - mu)**2 / sig**2
+            if feh_prior is not None:
+                mu, sig = feh_prior
+                loglike += -0.5 * (p[4] - mu)**2 / sig**2
+            return -loglike
+
         solver = jaxopt.ScipyBoundedMinimize(fun=objective, method=method)
 
         for i in range(maxiter):

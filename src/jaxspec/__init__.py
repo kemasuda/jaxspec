@@ -11,3 +11,4 @@ __description__ = "stellar parameter estimation with jax"
 #from .coelhofit import *
 from . import modelgrid
 from . import specfit
+from . import numpyro_model
