@@ -9,7 +9,7 @@ config.update('jax_enable_x64', True)
 
 from .utils import *
 from .specgrid import SpecGrid
-from .specmodel import SpecModel
+from .specmodel import SpecModel, SpecModel2
 from astropy.stats import sigma_clipped_stats
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
@@ -92,7 +92,7 @@ class SpecFit:
     #def ziplist(self):
     #    return zip(self.sm.wav_obs, self.sm.flux_obs, self.sm.error_obs, self.sm.mask_obs, self.orders)
 
-    def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., output_dir=None, tag=''):
+    def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., output_dir=None, ccfvmax=100., tag=''):
         vgrids, ccfs, ccffuncs = [], [], []
         sm = self.sm
         wmodels, fmodels = sm.wavgrid, sm.sgvalues(teff, logg, feh, alpha)
@@ -106,10 +106,11 @@ class SpecFit:
 
         ccfrvs = np.array([vg[np.argmax(ccf)] for vg, ccf in zip(vgrids, ccfs)])
         ccfrv = np.median(ccfrvs)
-        rvgrid = np.linspace(ccfrv-100, ccfrv+100, 10000)
+        rvgrid = np.linspace(ccfrv-ccfvmax, ccfrv+ccfvmax, 10000)
         medccf = np.median(np.array([cf(rvgrid) for cf in ccffuncs]), axis=0)
+
         plt.figure(figsize=(8,4))
-        plt.xlim(ccfrv-100, ccfrv+100)
+        plt.xlim(ccfrv-ccfvmax, ccfrv+ccfvmax)
         plt.xlabel("radial velocity (km/s)")
         plt.ylabel("normalized CCF")
         plt.axvline(x=ccfrv, label='median: %.1fkm/s'%ccfrv, color='gray', lw=2, alpha=0.4)
@@ -144,10 +145,12 @@ class SpecFit:
 
         pnames = ['c0', 'c1', 'teff', 'logg', 'feh', 'alpha', 'vsini', 'zeta', 'wavres', 'rv', 'u1', 'u2', 'lna', 'lnc', 'lnsigma']
         if set_init_params is None:
-            init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, resmin, rvmin, 0, 0]+[-3., 0., -8])
+            #init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, resmin, rvmin, 0, 0]+[-3., 0., -8])
+            init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, 0.5*(resmin+resmax), rvmean, 0, 0]+[-3., 0., -8])
         else:
             init_params = set_init_params
-        params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, 0.5*(resmin+resmax), rvmean, 0, 0]+[-5, -5, -10.])
+        #params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, 0.5*(resmin+resmax), rvmean, 0, 0]+[-5, -5, -10.])
+        params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, resmin, rvmin, 0, 0]+[-5, -5, -10.])
         params_upper = jnp.array([1.2, 0.1, 7000, 5., 0.5, 0.4, vsinimax, zetamax, resmax, rvmax, 0, 0]+[0, 1, lnsigmamax])
         bounds = (params_lower, params_upper)
         self.pnames = pnames
@@ -368,3 +371,122 @@ class SpecFit:
             if output_dir is not None:
                 plt.savefig(output_dir+"residual%s_order%02d.png"%(tag,order), dpi=200, bbox_inches="tight")
                 plt.close()
+
+
+class SpecFit2(SpecFit):
+    """ SB2 """
+    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4.):
+        wav_obs, flux_obs, error_obs, mask_obs = data
+        assert np.shape(wav_obs)[0] == len(orders)
+
+        wavranges, paths = get_grid_wavranges_and_paths(gridpath)
+        paths_order = []
+        for i, wobs in enumerate(wav_obs):
+            wobsmin, wobsmax = wobs.min(), wobs.max()
+            grididx = np.where((wavranges[:,0] < wobsmin) & (wavranges[:,1] > wobsmax))[0]
+            assert len(grididx) == 1, "grid data for order %d not found."%orders[i]
+            grididx = int(grididx)
+            assert np.min(wobs - wavranges[grididx,0]) > wav_margin, "observed wavelengths outside of margin."
+            assert np.min(wavranges[grididx,1] - wobs) > wav_margin, "observed wavelengths of margin."
+            paths_order.append(paths[grididx])
+
+        self.sm = SpecModel2(SpecGrid(paths_order), wav_obs, flux_obs, error_obs, mask_obs)
+        self.orders = orders
+        self.wavresmin = [70000.]*len(orders)
+        self.wavresmax = [70000.]*len(orders)
+        self.ccfrvlist = None
+        self.ccfvbroad = None
+        self.rvbounds = None
+        self.params_opt = None
+        self.pnames = None
+        self.bounds = None
+        self.v1 = None
+        self.v2 = None
+
+    def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., output_dir=None, ccfvmax=100., tag=''):
+        vgrids, ccfs, ccffuncs = [], [], []
+        sm = self.sm
+        wmodels, fmodels = sm.wavgrid, sm.sgvalues(teff, logg, feh, alpha)
+        for wobs, fobs, eobs, mobs, mfit, order, wmodel, fmodel in zip(sm.wav_obs, sm.flux_obs, sm.error_obs, sm.mask_obs, sm.mask_fit, self.orders, wmodels, fmodels):
+            print ("# order %d"%order)
+            mask = mobs + (mfit > 0.)
+            vgrid, ccf = compute_ccf(wobs[~mask], fobs[~mask], wmodel, fmodel)
+            vgrids.append(vgrid)
+            ccfs.append(ccf)
+            ccffuncs.append(interp1d(vgrid, ccf))
+
+        ccfrvs = np.array([vg[np.argmax(ccf)] for vg, ccf in zip(vgrids, ccfs)])
+        ccfrv = np.median(ccfrvs)
+        rvgrid = np.linspace(ccfrv-ccfvmax, ccfrv+ccfvmax, 10000)
+        medccf = np.median(np.array([cf(rvgrid) for cf in ccffuncs]), axis=0)
+
+        # CCF velocities for two stars
+        v_center = np.average(rvgrid, weights=np.abs(medccf))
+        ccf1 = np.where(rvgrid < v_center, medccf, 0)
+        ccf2 = np.where(rvgrid < v_center, 0, medccf)
+        v1, v2 = rvgrid[np.argmax(ccf1)], rvgrid[np.argmax(ccf2)]
+        self.v1 = v1
+        self.v2 = v2
+
+        plt.figure(figsize=(8,4))
+        plt.xlim(ccfrv-ccfvmax, ccfrv+ccfvmax)
+        plt.xlabel("radial velocity (km/s)")
+        plt.ylabel("normalized CCF")
+        plt.axvline(x=ccfrv, label='median: %.1fkm/s'%ccfrv, color='gray', lw=2, alpha=0.4)
+        plt.axvline(x=v1, label='star1: %.1fkm/s'%v1, color='C0', lw=1, alpha=0.4, ls='dotted')
+        plt.axvline(x=v2, label='star2: %.1fkm/s'%v2, color='C1', lw=1, alpha=0.4, ls='dotted')
+        for i, (vg, ccf) in enumerate(zip(vgrids, ccfs)):
+            plt.plot(vg, ccf/np.max(ccf), '-', lw=0.5, label='order %d'%self.orders[i])
+        plt.plot(rvgrid, medccf/np.max(medccf), color='gray', lw=2)
+        plt.legend(loc='upper right', bbox_to_anchor=(1.35,1))
+        if output_dir is not None:
+            plt.savefig(output_dir+"ccfs%s.png"%tag, dpi=200, bbox_inches='tight')
+            plt.close()
+
+        dccf = medccf/np.max(medccf) - 0.5
+        dccfderiv = dccf[1:] * dccf[:-1]
+        v50 = rvgrid[1:][dccfderiv<0]
+        vbroad = np.max(v50) - np.min(v50)
+
+        self.ccfrvlist = ccfrvs
+        self.ccfvbroad = vbroad
+
+        return rvgrid, medccf
+
+    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None):
+        vsinimax = 30.
+        rvmin1, rvmax1 = self.v1 - 0.5*vsinimax, self.v1 + 0.5*vsinimax
+        dv = self.v2  - self.v1
+        dvmin, dvmax = dv * 0.5, dv * 2
+        zetamin, zetamax = 0, 10.
+        resmin, resmax = np.mean(self.wavresmin), np.mean(self.wavresmax)
+
+        pnames = ['c0', 'c1', 'teff1', 'logg1', 'feh1', 'alpha1', 'vsini1', 'zeta1', \
+                'teff2', 'logg2', 'feh2', 'alpha2', 'vsini2', 'zeta2',
+                'wavres', 'rv', 'drv', 'u1', 'u2', 'lna', 'lnc', 'lnsigma']
+        if set_init_params is None:
+            init_params = jnp.array([1, 0]+[6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax]+[6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax]+[0.5*(resmin+resmax), self.v1, dv, 0, 0]+[-3., 0., -8])
+        else:
+            init_params = set_init_params
+        params_lower = jnp.array([0.8, -0.1]+[3500., 3., -1., 0., vsinimin, zetamin]+[3500., 3., -1., 0., vsinimin, zetamin]+[resmin, rvmin1, dvmin, 0, 0]+[-5, -5, -10.])
+        params_upper = jnp.array([1.2, 0.1]+[7000, 5., 0.5, 0.4, vsinimax, zetamax]+[7000, 5., 0.5, 0.4, vsinimax, zetamax]+[resmax, rvmax1, dvmax, 0, 0]+[0, 1, lnsigmamax])
+        bounds = (params_lower, params_upper)
+        self.rv1bounds = (rvmin1, rvmax1)
+        self.drvbounds = (dvmin, dvmax)
+        self.pnames = pnames
+        self.bounds = bounds
+
+        objective = lambda p: -self.sm.gp_loglikelihood_sb2(p)
+
+        print ("# initial objective function:", objective(init_params))
+        if solver is None:
+            solver = jaxopt.ScipyBoundedMinimize(fun=objective, method=method)
+        res = solver.run(init_params, bounds=bounds)
+
+        params, state = res
+        print (state)
+        for n,v in zip(pnames, params):
+            print ("%s\t%f"%(n,v))
+
+        self.params_opt = params
+        return params

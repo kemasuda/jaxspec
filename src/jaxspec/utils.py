@@ -89,7 +89,7 @@ broaden_and_shift_vmap = vmap(broaden_and_shift, (0,0,0,None,None,None,None,0,No
 broaden_and_shift_vmap_full = vmap(broaden_and_shift, (0,0,0,None,None,0,0,0,None,None), 0)
 
 
-def compute_ccf(x, y, xmodel, ymodel, mask=None, resolution_factor=5):
+def compute_ccf(x, y, xmodel, ymodel, mask=None, oversample_factor=5):
     """ compute cross-correlation function with model
 
         Args:
@@ -98,7 +98,7 @@ def compute_ccf(x, y, xmodel, ymodel, mask=None, resolution_factor=5):
             xmodel: model wavelength
             ymodel: model flux
             mask: data to be masked
-            resolution_factor: ovesampling factor for the data
+            oversample_factor: ovesampling factor for the data
 
         Returns:
             velgrid: velocity grid (km/s)
@@ -111,7 +111,7 @@ def compute_ccf(x, y, xmodel, ymodel, mask=None, resolution_factor=5):
     yy[mask] = np.nan
 
     ndata = len(x)
-    xgrid = np.logspace(np.log10(x.min())+1e-4, np.log10(x.max())-1e-4, ndata*resolution_factor)
+    xgrid = np.logspace(np.log10(x.min())+1e-4, np.log10(x.max())-1e-4, ndata*oversample_factor)
     ygrid = interp1d(x, yy)(xgrid) - np.nanmean(yy)#1.
     ymgrid = interp1d(xmodel, ymodel)(xgrid) - np.nanmean(ymodel)
     ygrid[ygrid!=ygrid] = 0
