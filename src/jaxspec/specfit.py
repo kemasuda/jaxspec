@@ -1,4 +1,4 @@
-__all__ = ["SpecFit"] #"grid_wavranges_paths"
+__all__ = ["SpecFit", "SpecFit2"] #"grid_wavranges_paths"
 
 
 import numpy as np
@@ -425,16 +425,34 @@ class SpecFit2(SpecFit):
         ccf1 = np.where(rvgrid < v_center, medccf, 0)
         ccf2 = np.where(rvgrid < v_center, 0, medccf)
         v1, v2 = rvgrid[np.argmax(ccf1)], rvgrid[np.argmax(ccf2)]
-        self.v1 = v1
-        self.v2 = v2
+
+        x = rvgrid
+        y = np.array(medccf / np.max(medccf))
+
+        def objective(p):
+            mu1, dmu, sig, a, b = p
+            mu2 = mu1 + dmu
+            model = a * jnp.exp(-0.5*(x-mu1)**2/sig**2) + b * jnp.exp(-0.5*(x-mu2)**2/sig**2)
+            return jnp.sum((y-model)**2)
+
+        solver = jaxopt.ScipyBoundedMinimize(fun=objective, method="TNC")
+        res = solver.run([v1, v2-v1, 5., 1., 1.], bounds=([v1-10, 0, 5., 0.5, 0.5], [v1+10, 300, 5., 1., 1.]))
+        v1opt, dvopt, sigopt, aopt, bopt = res.params
+
+        self.v1 = v1opt
+        self.v2 = v1opt + dvopt
+        ccf1, ccf2 = aopt * jnp.exp(-0.5*(x-self.v1)**2/sigopt**2), bopt * jnp.exp(-0.5*(x-self.v2)**2/sigopt**2)
 
         plt.figure(figsize=(8,4))
         plt.xlim(ccfrv-ccfvmax, ccfrv+ccfvmax)
         plt.xlabel("radial velocity (km/s)")
         plt.ylabel("normalized CCF")
-        plt.axvline(x=ccfrv, label='median: %.1fkm/s'%ccfrv, color='gray', lw=2, alpha=0.4)
-        plt.axvline(x=v1, label='star1: %.1fkm/s'%v1, color='C0', lw=1, alpha=0.4, ls='dotted')
-        plt.axvline(x=v2, label='star2: %.1fkm/s'%v2, color='C1', lw=1, alpha=0.4, ls='dotted')
+        #plt.axvline(x=ccfrv, label='median: %.1fkm/s'%ccfrv, color='gray', lw=2, alpha=0.4)
+        plt.axvline(x=self.v1, label='star1: %.1fkm/s'%self.v1, color='C0', lw=1.5, alpha=0.4, ls='dashed')
+        plt.plot(x, ccf1, color='C0', lw=1., alpha=0.6, ls='solid')
+        plt.axvline(x=self.v2, label='star2: %.1fkm/s'%self.v2, color='C1', lw=1.5, alpha=0.4, ls='dashed')
+        plt.plot(x, ccf2, color='C1', lw=1., alpha=0.6, ls='solid')
+        #plt.plot(x, ccf1+ccf2, color='gray', lw=1., alpha=0.6, ls='solid')
         for i, (vg, ccf) in enumerate(zip(vgrids, ccfs)):
             plt.plot(vg, ccf/np.max(ccf), '-', lw=0.5, label='order %d'%self.orders[i])
         plt.plot(rvgrid, medccf/np.max(medccf), color='gray', lw=2)
@@ -456,8 +474,8 @@ class SpecFit2(SpecFit):
     def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None):
         vsinimax = 30.
         rvmin1, rvmax1 = self.v1 - 0.5*vsinimax, self.v1 + 0.5*vsinimax
-        dv = self.v2  - self.v1
-        dvmin, dvmax = dv * 0.5, dv * 2
+        dv = self.v2 - self.v1
+        dvmin, dvmax = dv * 0., dv * 2
         zetamin, zetamax = 0, 10.
         resmin, resmax = np.mean(self.wavresmin), np.mean(self.wavresmax)
 
@@ -476,7 +494,7 @@ class SpecFit2(SpecFit):
         self.pnames = pnames
         self.bounds = bounds
 
-        objective = lambda p: -self.sm.gp_loglikelihood_sb2(p)
+        objective = lambda p: -self.sm.gp_loglikelihood(p)
 
         print ("# initial objective function:", objective(init_params))
         if solver is None:

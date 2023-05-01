@@ -124,7 +124,7 @@ def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_w
     else:
         wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf.wavresmin), high=jnp.array(sf.wavresmax))) # output shape becomes () when the name is "wavres"...????
 
-    # linear baseline: quadratic is not better
+    # linear baseline: quadratic is not much better
     c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
     c1 = numpyro.sample("slope", dist.Uniform(low=-0.1*ones, high=0.1*ones))
     rv1 = numpyro.sample("rv1", dist.Uniform(low=sf.rv1bounds[0]*ones, high=sf.rv1bounds[1]*ones))
