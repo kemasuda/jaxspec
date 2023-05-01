@@ -1,4 +1,4 @@
-__all__ = ["model", "model_sb2", "initialize_HMC", "get_mean_models"]
+__all__ = ["model", "model_sb2", "initialize_HMC", "get_mean_models", "model_sb2_numpyrogp"]
 
 import jax.numpy as jnp
 import numpy as np
@@ -147,6 +147,75 @@ def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_w
     gp.compute(self.wav_obs[idx].ravel(), diag=diags[idx].ravel())
     flux_residual = numpyro.deterministic("flux_residual", self.flux_obs[idx].ravel() - fluxmodel[idx].ravel())
     numpyro.sample("obs", gp.numpyro_dist(), obs=flux_residual)
+
+def cov_rbf(x, tau, alpha, diag):
+    dx = x[:,None] - x[None, :]
+    return alpha**2 * jnp.exp(-0.5 * (dx / tau)**2) + jnp.diag(diag)
+
+
+def model_sb2_numpyrogp(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_wavres=False,
+        teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False):
+    """ SB2 model
+    """
+    self = sf.sm
+
+    teff1 = numpyro.sample("teff1", dist.Uniform(3500, 7000))
+    teff2 = numpyro.sample("teff2", dist.Uniform(3500, 7000))
+    if physical_logg_max:
+        logg_max1 = -2.34638497e-08*teff1**2 + 1.58069918e-04*teff1 + 4.53251890 # valid for 4500-7000K
+        logg_max2 = -2.34638497e-08*teff2**2 + 1.58069918e-04*teff2 + 4.53251890
+    else:
+        logg_max1, logg_max2 = 5., 5.
+    logg1 = numpyro.sample("logg1", dist.Uniform(3., logg_max1))
+    logg2 = numpyro.sample("logg2", dist.Uniform(3., logg_max2))
+    feh1 = numpyro.sample("feh1", dist.Uniform(-1, 0.5))
+    feh2 = numpyro.sample("feh2", dist.Uniform(-1, 0.5))
+
+    alpha1 = numpyro.sample("alpha1", dist.Uniform(0., 0.4))
+    alpha2 = numpyro.sample("alpha2", dist.Uniform(0., 0.4))
+    vsini1 = numpyro.sample("vsini1", dist.Uniform(0, vsinimax))
+    vsini2 = numpyro.sample("vsini2", dist.Uniform(0, vsinimax))
+    if empirical_vmacro:
+        zeta1 = numpyro.deterministic("zeta1", 3.98 + (teff1 - 5770.) / 650.)
+        zeta2 = numpyro.deterministic("zeta2", 3.98 + (teff2 - 5770.) / 650.)
+    else:
+        zeta1 = numpyro.sample("zeta1", dist.Uniform(0., 10.))
+        zeta2 = numpyro.sample("zeta2", dist.Uniform(0., 10.))
+    q1 = numpyro.sample("q1", dist.Uniform(0, 1))
+    q2 = numpyro.sample("q2", dist.Uniform(0, 1))
+    u1 = numpyro.deterministic("u1", 2*jnp.sqrt(q1)*q2)
+    u2 = numpyro.deterministic("u2", jnp.sqrt(q1)-u1)
+
+    ones = jnp.ones(self.Norder)
+    if sf.wavresmin[0] == sf.wavresmax[0]:
+        wavres = numpyro.deterministic("res", jnp.array(sf.wavresmin))#[0] * ones)
+    elif single_wavres:
+        wavres_single = numpyro.sample("res", dist.Uniform(low=sf.wavresmin[0], high=sf.wavresmax[0]))
+        wavres = ones * wavres_single
+    else:
+        wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf.wavresmin), high=jnp.array(sf.wavresmax))) # output shape becomes () when the name is "wavres"...????
+
+    # linear baseline: quadratic is not much better
+    c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
+    c1 = numpyro.sample("slope", dist.Uniform(low=-0.1*ones, high=0.1*ones))
+    rv1 = numpyro.sample("rv1", dist.Uniform(low=sf.rv1bounds[0]*ones, high=sf.rv1bounds[1]*ones))
+    drv = numpyro.sample("drv", dist.Uniform(low=sf.drvbounds[0]*ones, high=sf.drvbounds[1]*ones))
+    rv2 = numpyro.deterministic("rv2", rv1 + drv)
+
+    fluxmodel = numpyro.deterministic("fluxmodel",
+        self.fluxmodel_multiorder(c0, c1, teff1, teff2, logg1, logg2, feh1, feh2, alpha1, alpha2, vsini1, vsini2, zeta1, zeta2, wavres, rv1, rv2, u1, u2)
+        )
+
+    lna = numpyro.sample("lna", dist.Uniform(-5, 0))
+    lntau = numpyro.sample("lntau", dist.Uniform(-5, 2))
+    lnsigma = numpyro.sample("lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
+    diags = self.error_obs**2 + jnp.exp(2*lnsigma)
+
+    mask_all = self.mask_obs + (self.mask_fit > 0)
+    idx = ~mask_all
+    cov = cov_rbf(self.wav_obs[idx].ravel(), jnp.exp(lntau), jnp.exp(lna), diags[idx].ravel())
+    flux_residual = numpyro.deterministic("flux_residual", self.flux_obs[idx].ravel() - fluxmodel[idx].ravel())
+    numpyro.sample("obs", dist.MultivariateNormal(loc=0., covariance_matrix=cov), obs=flux_residual)
 
 
 def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True):
