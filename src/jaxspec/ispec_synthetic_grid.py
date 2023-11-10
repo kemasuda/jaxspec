@@ -5,11 +5,11 @@ import os
 import sys
 import numpy as np
 import pathlib
-ispec_dir = str(pathlib.Path("~/iSpec/").expanduser()) + "/"
-sys.path.insert(0, os.path.abspath(ispec_dir))
 
 # %%
 def define_grid_ranges(tmin=3500., tmax=7500., tstep=250., gmin=3., gmax=5., gstep=0.5, fmin=-1, fmax=0.5, fstep=0.25, amin=0., amax=0.4, astep=0.4):
+    ispec_dir = str(pathlib.Path("~/iSpec/").expanduser()) + "/"
+    sys.path.insert(0, os.path.abspath(ispec_dir))
     import ispec
 
     teffs = np.arange(tmin, tmax+tstep, tstep)
@@ -43,6 +43,8 @@ def define_grid_ranges(tmin=3500., tmax=7500., tstep=250., gmin=3., gmax=5., gst
 # %%
 def precompute_synthetic_grid(ranges, wnm_min, wnm_max, wavgrid_length, dir_head, code, atmosphere_model='marcs',
                               number_of_processes=1):
+    ispec_dir = str(pathlib.Path("~/iSpec/").expanduser()) + "/"
+    sys.path.insert(0, os.path.abspath(ispec_dir))
     import ispec
     import logging
     import multiprocessing
@@ -83,9 +85,13 @@ def precompute_synthetic_grid(ranges, wnm_min, wnm_max, wavgrid_length, dir_head
     #model = ispec_dir + "/input/atmospheres/ATLAS9.Kurucz/"
     #model = ispec_dir + "/input/atmospheres/ATLAS9.Kirby/"
 
-    #atomic_linelist_file = ispec_dir + "/input/linelists/transitions/VALD.300_1100nm/atomic_lines.tsv"
-    atomic_linelist_file = ispec_dir + "/input/linelists/transitions/VALD.1100_2400nm/atomic_lines.tsv"
-    #atomic_linelist_file = ispec_dir + "/input/linelists/transitions/GESv6_atom_hfs_iso.420_920nm/atomic_lines.tsv"
+    if wnm_min > 300 and wnm_max < 1100:
+        atomic_linelist_file = ispec_dir + "/input/linelists/transitions/VALD.300_1100nm/atomic_lines.tsv"
+    elif wnm_min > 1100 and wnm_max < 2400:
+        #atomic_linelist_file = ispec_dir + "/input/linelists/transitions/VALD.1100_2400nm/atomic_lines.tsv"
+        atomic_linelist_file = ispec_dir + "/input/linelists/transitions/GESv6_atom_hfs_iso.420_920nm/atomic_lines.tsv"
+    else:
+        raise ValueError("Check the wavelength ranges.")
     #atomic_linelist_file = ispec_dir + "/input/linelists/transitions/GESv6_atom_nohfs_noiso.420_920nm/atomic_lines.tsv"
 
     isotope_file = ispec_dir + "/input/isotopes/SPECTRUM.lst"
