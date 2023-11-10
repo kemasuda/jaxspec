@@ -208,7 +208,7 @@ class SpecModel2(SpecModel):
         return flux_phys
 
     @partial(jit, static_argnums=(0,))
-    def gp_loglikelihood_(self, params):
+    def gp_loglikelihood(self, params):
         """ compute model likelihood using GP
 
             Args:
@@ -259,3 +259,64 @@ class SpecModel2(SpecModel):
         res = self.flux_obs[idx].ravel() - flux_model[idx].ravel()
 
         return gp, res
+
+    ''' tinygp? 
+    @partial(jit, static_argnums=(0,))
+    def gp_loglikelihood(self, params):
+        """ compute model likelihood using GP
+
+            Args:
+                params: physical parameters + log(amplitude), log(timescale), log(sigma) for the  Matern-3/2 kernel
+
+            Returns:
+                GP log-likelihood
+
+        """
+        from tinygp import kernels, GaussianProcess
+
+        lna, lnc, lnsigma = params[-3:]
+        #kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+        diags = self.error_obs**2 + jnp.exp(2*lnsigma)
+        kernel = jnp.exp(2*lna) * kernels.Matern32(jnp.exp(lnc))
+
+        mask_obs = self.mask_obs
+        mask_all = mask_obs + (self.mask_fit > 0)
+        idx = ~mask_all
+
+        flux_model = self.fluxmodel(self.wav_obs, params[:-3])
+
+        #gp = GaussianProcess(kernel, mean=0.0)
+        #gp.compute(self.wav_obs[idx].ravel(), diag=diags[idx].ravel())
+        gp = GaussianProcess(kernel, self.wav_obs[idx].ravel(), diag=diags[idx].ravel(), mean=0.0)
+        res = self.flux_obs[idx].ravel() - flux_model[idx].ravel()
+
+        #return gp.log_likelihood(res)
+        return gp.log_probability(res)
+
+    def gp_predict(self, params):
+        """ compute model likelihood using GP
+
+            Args:
+                params: physical parameters + log(amplitude), log(timescale), log(sigma) for the  Matern-3/2 kernel
+
+            Returns:
+                GP likelihood
+                GP instance and residual (if predict is True)
+
+        """
+        lna, lnc, lnsigma = params[-3:]
+        diags = self.error_obs**2 + jnp.exp(2*lnsigma)
+        kernel = jnp.exp(2*lna) * kernels.Matern32(jnp.exp(lnc))
+
+        mask_obs = self.mask_obs
+        mask_all = mask_obs + (self.mask_fit > 0)
+        idx = ~mask_all
+        flux_model = self.fluxmodel(self.wav_obs, params[:-3])
+
+        #gp = GaussianProcess(kernel, mean=0.0)
+        #gp.compute(self.wav_obs[idx].ravel(), diag=diags[idx].ravel())
+        gp = GaussianProcess(kernel, self.wav_obs[idx].ravel(), diag=diags[idx].ravel(), mean=0.0)
+        res = self.flux_obs[idx].ravel() - flux_model[idx].ravel()
+
+        return gp, res
+    '''
