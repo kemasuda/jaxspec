@@ -12,3 +12,4 @@ __description__ = "stellar parameter estimation with jax"
 from . import modelgrid
 from . import specfit
 from . import numpyro_model
+from . import ispec_synthetic_grid
