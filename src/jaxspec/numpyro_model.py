@@ -83,7 +83,8 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False,
 
 
 def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_wavres=False,
-        teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False):
+        rv1bounds=None, drvbounds=None,
+        teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False, lncmin=-5):
     """ SB2 model
     """
     self = sf.sm
@@ -127,8 +128,18 @@ def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_w
     # linear baseline: quadratic is not much better
     c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
     c1 = numpyro.sample("slope", dist.Uniform(low=-0.1*ones, high=0.1*ones))
-    rv1 = numpyro.sample("rv1", dist.Uniform(low=sf.rv1bounds[0]*ones, high=sf.rv1bounds[1]*ones))
-    drv = numpyro.sample("drv", dist.Uniform(low=sf.drvbounds[0]*ones, high=sf.drvbounds[1]*ones))
+    #rv1 = numpyro.sample("rv1", dist.Uniform(low=sf.rv1bounds[0]*ones, high=sf.rv1bounds[1]*ones))
+    #drv = numpyro.sample("drv", dist.Uniform(low=sf.drvbounds[0]*ones, high=sf.drvbounds[1]*ones))
+    if rv1bounds is None:
+        rv1min, rv1max = sf.rv1bounds
+    else:
+        rv1min, rv1max = rv1bounds
+    rv1 = numpyro.sample("rv1", dist.Uniform(low=rv1min*ones, high=rv1max*ones))
+    if drvbounds is None:
+        drvmin, drvmax = sf.drvbounds
+    else:
+        drvmin, drvmax = drvbounds
+    drv = numpyro.sample("drv", dist.Uniform(low=drvmin, high=drvmax))
     rv2 = numpyro.deterministic("rv2", rv1 + drv)
 
     fluxmodel = numpyro.deterministic("fluxmodel",
@@ -136,7 +147,7 @@ def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_w
         )
 
     lna = numpyro.sample("lna", dist.Uniform(low=-5, high=0))
-    lnc = numpyro.sample("lnc", dist.Uniform(low=-5, high=2))
+    lnc = numpyro.sample("lnc", dist.Uniform(low=lncmin, high=2))
     kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
     lnsigma = numpyro.sample("lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
     diags = self.error_obs**2 + jnp.exp(2*lnsigma)
