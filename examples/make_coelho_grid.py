@@ -7,10 +7,6 @@ import numpy as np
 import pandas as pd
 from jaxspec.modelgrid import *
 
-#%% input and output directories
-data_dir = "/Users/k_masuda/data/s_coelho05/"
-output_dir = "/Users/k_masuda/data/specgrid_irdh_coelho/"
-
 #%% grid parameters
 teffs = np.arange(3500, 7001, 250)
 loggs = np.arange(1, 5.1, 1.)
@@ -32,12 +28,25 @@ print ("logg:", loggs)
 print ("feh:", fehs)
 print ("alpha:", alphas)
 
-#%%
+#%% input and output directories: IRD H-band
+data_dir = "/Users/k_masuda/data/s_coelho05/"
+output_dir = "/Users/k_masuda/data/specgrid_irdh_coelho/"
 d = pd.read_csv("wavranges_ird_h.csv")
+wavfactor = 10. # nm -> AA
+air_or_vac = "vac"
+
+#%% input and output directories: GAOES-RV
+data_dir = "/Users/k_masuda/data/s_coelho05/"
+output_dir = "/Users/k_masuda/data/specgrid_gaoes_coelho/"
+d = pd.read_csv("wavranges_gaoes-rv.csv")
+wavfactor = 1. 
+air_or_vac = "air"
 
 #%%
-for i in range(1):
-    wmin_aa = int(d.iloc[i].wavmin*10) - 5
-    wmax_aa = int(d.iloc[i].wavmax*10) + 5
+wmargin = 5 # margin in AA
+for i in range(1, len(d)):
+    wmin_aa = int(d.iloc[i].wavmin*wavfactor) - wmargin
+    wmax_aa = int(d.iloc[i].wavmax*wavfactor) + wmargin
     print ("#", wmin_aa, wmax_aa)
-    output = compute_grid_coelho(model_params, wmin_aa, wmax_aa, data_dir=data_dir, output_dir=output_dir)
+    output = compute_grid_coelho(model_params, wmin_aa, wmax_aa, data_dir=data_dir, output_dir=output_dir, air_or_vac=air_or_vac)
+
