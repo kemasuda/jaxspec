@@ -88,8 +88,7 @@ def precompute_synthetic_grid(ranges, wnm_min, wnm_max, wavgrid_length, dir_head
     if wnm_min > 300 and wnm_max < 1100:
         atomic_linelist_file = ispec_dir + "/input/linelists/transitions/VALD.300_1100nm/atomic_lines.tsv"
     elif wnm_min > 1100 and wnm_max < 2400:
-        #atomic_linelist_file = ispec_dir + "/input/linelists/transitions/VALD.1100_2400nm/atomic_lines.tsv"
-        atomic_linelist_file = ispec_dir + "/input/linelists/transitions/GESv6_atom_hfs_iso.420_920nm/atomic_lines.tsv"
+        atomic_linelist_file = ispec_dir + "/input/linelists/transitions/VALD.1100_2400nm/atomic_lines.tsv"
     else:
         raise ValueError("Check the wavelength ranges.")
     #atomic_linelist_file = ispec_dir + "/input/linelists/transitions/GESv6_atom_nohfs_noiso.420_920nm/atomic_lines.tsv"
