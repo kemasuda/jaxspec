@@ -45,7 +45,7 @@ def get_grid_wavranges_and_paths(gridpath):
 
 
 class SpecFit:
-    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4.):
+    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., gpu=False):
         wav_obs, flux_obs, error_obs, mask_obs = data
         assert np.shape(wav_obs)[0] == len(orders)
 
@@ -60,7 +60,7 @@ class SpecFit:
             assert np.min(wavranges[grididx,1] - wobs) > wav_margin, "observed wavelengths of margin."
             paths_order.append(paths[grididx])
 
-        self.sm = SpecModel(SpecGrid(paths_order), wav_obs, flux_obs, error_obs, mask_obs)
+        self.sm = SpecModel(SpecGrid(paths_order), wav_obs, flux_obs, error_obs, mask_obs, gpu=gpu)
         self.orders = orders
         self.wavresmin = [70000.]*len(orders)
         self.wavresmax = [70000.]*len(orders)
@@ -132,7 +132,7 @@ class SpecFit:
 
         return ccfrv, vbroad
 
-    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None):
+    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slope_max=0.2):
         vsinimax = self.ccfvbroad
         rvmean = sigma_clipped_stats(self.ccfrvlist)[0]
         if vsinimax < 20:
@@ -150,8 +150,8 @@ class SpecFit:
         else:
             init_params = set_init_params
         #params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, 0.5*(resmin+resmax), rvmean, 0, 0]+[-5, -5, -10.])
-        params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, resmin, rvmin, 0, 0]+[-5, -5, -10.])
-        params_upper = jnp.array([1.2, 0.1, 7000, 5., 0.5, 0.4, vsinimax, zetamax, resmax, rvmax, 0, 0]+[0, 1, lnsigmamax])
+        params_lower = jnp.array([0.8, -slope_max, 3500., 3., -1., 0., vsinimin, zetamin, resmin, rvmin, 0, 0]+[-5, -5, -10.])
+        params_upper = jnp.array([1.2, slope_max, 7000, 5., 0.5, 0.4, vsinimax, zetamax, resmax, rvmax, 0, 0]+[0, 1, lnsigmamax])
         bounds = (params_lower, params_upper)
         self.pnames = pnames
         self.bounds = bounds
@@ -171,7 +171,7 @@ class SpecFit:
         self.params_opt = params
         return params
 
-    def optim_iterate(self, maxiter=10, cut0=5., cut1=3., method="TNC", plot=True, lnsigmamax=-5,
+    def optim_iterate(self, maxiter=10, cut0=5., cut1=3., method="TNC", plot=True, lnsigmamax=-5, slope_max=0.2,
                     teff_prior=None, logg_prior=None, feh_prior=None, **kwargs):
         params_opt = None
         sm = self.sm
@@ -197,7 +197,7 @@ class SpecFit:
         for i in range(maxiter):
             print ("# iteration %d..."%i)
 
-            params_opt = self.optim(solver, set_init_params=params_opt, lnsigmamax=lnsigmamax)
+            params_opt = self.optim(solver, set_init_params=params_opt, lnsigmamax=lnsigmamax, slope_max=slope_max)
 
             if i==0:
                 cut = cut0
@@ -211,9 +211,13 @@ class SpecFit:
             """
             ms = sm.fluxmodel(sm.wav_obs, params_opt[:-3])
             mds = sm.fluxmodel(sm.wavgrid, params_opt[:-3])
-            gp, res = sm.gp_predict(params_opt)
-
-            mgps = np.array([gp.predict(res, t=wobs) for wobs in sm.wav_obs]) + ms
+            #gp, res = sm.gp_predict(params_opt)
+            #mgps = np.array([gp.predict(res, t=wobs) for wobs in sm.wav_obs]) + ms
+            gps, resids = sm.gp_predict(params_opt)
+            try:
+                mgps = np.array([gp.predict(res, t=wobs) for gp, res, wobs in zip(gps, resids, sm.wav_obs)]) + ms
+            except:
+                mgps = np.array([gp.predict(res, X_test=wobs) for gp, res, wobs in zip(gps, resids, sm.wav_obs)]) + ms
 
             res_phys = np.array(sm.flux_obs - ms)
             res_phys[mask_all] = np.nan
@@ -252,10 +256,17 @@ class SpecFit:
         mds = sm.fluxmodel(params[:-3], observed=False)
         _, (gp, res) = sm.gpfluxmodel(params, predict=True)
         """
-        ms = sm.fluxmodel(sm.wav_obs, params_opt[:-3])
-        mds = sm.fluxmodel(sm.wavgrid, params_opt[:-3])
-        gp, res = sm.gp_predict(params_opt)
+        ms = sm.fluxmodel(sm.wav_obs, params[:-3])
+        mds = sm.fluxmodel(sm.wavgrid, params[:-3])
+        """
+        gp, res = sm.gp_predict(params)
         mgps = np.array([gp.predict(res, t=wobs) for wobs in sm.wav_obs]) + ms
+        """
+        gps, resids = sm.gp_predict(params)
+        try:
+            mgps = np.array([gp.predict(res, t=wobs) for gp, res, wobs in zip(gps, resids, sm.wav_obs)]) + ms
+        except:
+            mgps = np.array([gp.predict(res, X_test=wobs) for gp, res, wobs in zip(gps, resids, sm.wav_obs)]) + ms
 
         for wobs, fobs, eobs, mobs, mfit, order, wgrid, m, md, mgp in zip(sm.wav_obs, sm.flux_obs, sm.error_obs, sm.mask_obs, sm.mask_fit, self.orders, sm.wavgrid, ms, mds, mgps):
             masked_obs = mobs

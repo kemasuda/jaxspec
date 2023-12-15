@@ -10,7 +10,7 @@ from celerite2.jax import terms as jax_terms
 from .utils import *
 
 
-def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False,
+def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, 
         teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False):
     """ standard model
     """
@@ -44,7 +44,7 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False,
     if empirical_vmacro:
         zeta = numpyro.deterministic("zeta", 3.98 + (teff - 5770.) / 650.)
     else:
-        zeta = numpyro.sample("zeta", dist.Uniform(0., 10.))
+        zeta = numpyro.sample("zeta", dist.Uniform(0., zeta_max))
     q1 = numpyro.sample("q1", dist.Uniform(0, 1))
     q2 = numpyro.sample("q2", dist.Uniform(0, 1))
     u1 = numpyro.deterministic("u1", 2*jnp.sqrt(q1)*q2)
@@ -61,7 +61,7 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False,
 
     # linear baseline: quadratic is not better
     c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
-    c1 = numpyro.sample("slope", dist.Uniform(low=-0.1*ones, high=0.1*ones))
+    c1 = numpyro.sample("slope", dist.Uniform(low=-slope_max*ones, high=slope_max*ones))
     rv = numpyro.sample("rv", dist.Uniform(low=sf.rvbounds[0]*ones, high=sf.rvbounds[1]*ones))
 
     fluxmodel = numpyro.deterministic("fluxmodel",
@@ -76,10 +76,20 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False,
 
     mask_all = self.mask_obs + (self.mask_fit > 0)
     idx = ~mask_all
+    # order-by-order gp
+    for j in range(len(fluxmodel)):
+        idxj = idx[j]
+        gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
+        gp.compute(self.wav_obs[j][idxj], diag=diags[j][idxj])
+        flux_residual = numpyro.deterministic("flux_residual%d"%j, self.flux_obs[j][idxj] - fluxmodel[j][idxj])
+        numpyro.sample("obs%d"%j, gp.numpyro_dist(), obs=flux_residual)
+    """
     gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
     gp.compute(self.wav_obs[idx].ravel(), diag=diags[idx].ravel())
     flux_residual = numpyro.deterministic("flux_residual", self.flux_obs[idx].ravel() - fluxmodel[idx].ravel())
     numpyro.sample("obs", gp.numpyro_dist(), obs=flux_residual)
+    """
+
 
 
 def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_wavres=False,
@@ -251,6 +261,7 @@ def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True)
     return init_strategy
 
 
+"""
 def get_mean_models(samples, sf, keytag=''):
     ms = np.mean(samples['fluxmodel'+keytag], axis=0)
     mres = np.mean(samples['flux_residual'+keytag], axis=0)
@@ -265,6 +276,32 @@ def get_mean_models(samples, sf, keytag=''):
     mgps = np.array([gp.predict(mres.ravel(), t=wobs) for wobs in sm.wav_obs]) + ms
 
     return ms, mgps
+"""
+
+
+def get_mean_models(samples, sf):
+    ms = np.mean(samples['fluxmodel'], axis=0)
+    lna, lnc, lnsigma = np.mean(samples['lna']), np.mean(samples['lnc']), np.mean(samples['lnsigma'])
+    
+    sm = sf.sm
+    idx = ~(sm.mask_obs+sm.mask_fit>0)
+    kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+    diags = sm.error_obs**2 + jnp.exp(2*lnsigma)
+
+    mgps = []
+    for j in range(len(idx)):
+        idxj = idx[j]
+        res = np.mean(samples['flux_residual%d'%j], axis=0)
+        if not sm.gpu:
+            gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
+            gp.compute(sm.wav_obs[j][idxj], diag=diags[j][idxj])
+            mgp = gp.predict(res, t=sm.wav_obs[j])
+        else:
+            gp = tinygp.GaussianProcess(kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
+            mgp = gp.predict(res, X_test=sm.wav_obs[j])
+        mgps.append(mgp)
+
+    return ms, np.array(mgps) + ms
 
 
 def model_pair(sf1, sf2, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False):

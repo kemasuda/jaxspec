@@ -7,12 +7,12 @@ from functools import partial
 from .utils import *
 from celerite2.jax import terms as jax_terms
 from celerite2.jax import GaussianProcess
-
+import tinygp
 
 class SpecModel:
     """ class to compute spectrum model
     """
-    def __init__(self, sg, wav_obs, flux_obs, error_obs, mask_obs, vmax=50.):
+    def __init__(self, sg, wav_obs, flux_obs, error_obs, mask_obs, vmax=50., gpu=False):
         """ initialization
 
             Args:
@@ -39,6 +39,7 @@ class SpecModel:
         self.error_obs = np.atleast_2d(error_obs)
         self.mask_obs = np.atleast_2d(mask_obs)
         self.mask_fit = np.zeros_like(self.wav_obs)
+        self.gpu = gpu
 
     def sgvalues(self, teff, logg, feh, alpha):
         """ fetch flux values at the native wavelength grids
@@ -96,19 +97,37 @@ class SpecModel:
 
         """
         lna, lnc, lnsigma = params[-3:]
-        kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+        if not self.gpu:
+            kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+        else:
+            kernel = jnp.exp(2*lna) * tinygp.kernels.Matern32(jnp.exp(lnc))
         diags = self.error_obs**2 + jnp.exp(2*lnsigma)
-
+    
         mask_obs = self.mask_obs
         mask_all = mask_obs + (self.mask_fit > 0)
         idx = ~mask_all
         flux_model = self.fluxmodel(self.wav_obs, params[:-3])
 
+        loglike = 0.
+        for j in range(len(flux_model)):
+            idxj = idx[j]
+            res = self.flux_obs[j][idxj] - flux_model[j][idxj]
+            if not self.gpu:
+                gp = GaussianProcess(kernel, mean=0.0)
+                gp.compute(self.wav_obs[j][idxj], diag=diags[j][idxj])
+                loglike += gp.log_likelihood(res)
+            else:
+                gp = tinygp.GaussianProcess(kernel, self.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
+                loglike += gp.log_probability(res)
+        return loglike
+
+        """
         gp = GaussianProcess(kernel, mean=0.0)
         gp.compute(self.wav_obs[idx].ravel(), diag=diags[idx].ravel())
         res = self.flux_obs[idx].ravel() - flux_model[idx].ravel()
 
         return gp.log_likelihood(res)
+        """
 
     def gp_predict(self, params):
         """ compute model likelihood using GP
@@ -122,7 +141,10 @@ class SpecModel:
 
         """
         lna, lnc, lnsigma = params[-3:]
-        kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+        if not self.gpu:
+            kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+        else:
+            kernel = jnp.exp(2*lna) * tinygp.kernels.Matern32(jnp.exp(lnc))
         diags = self.error_obs**2 + jnp.exp(2*lnsigma)
 
         mask_obs = self.mask_obs
@@ -130,6 +152,20 @@ class SpecModel:
         idx = ~mask_all
         flux_model = self.fluxmodel(self.wav_obs, params[:-3])
 
+        gps, residuals = [], []
+        for j in range(len(flux_model)):
+            idxj = idx[j]
+            res = self.flux_obs[j][idxj] - flux_model[j][idxj]
+            if not self.gpu:
+                gp = GaussianProcess(kernel, mean=0.0)
+                gp.compute(self.wav_obs[j][idxj], diag=diags[j][idxj])
+            else:
+                gp = tinygp.GaussianProcess(kernel, self.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
+            gps.append(gp)
+            residuals.append(res)
+        return gps, residuals
+
+        """
         #gp = celerite2.jax.GaussianProcess(kernel, mean=flux_model[idx].ravel())
         #gp.compute(wav_obs[idx].ravel(), diag=diags[idx].ravel())
         #return gp.predict(self.flux_obs[idx].ravel()), gp.log_likelihood(self.flux_obs[idx].ravel())
@@ -141,6 +177,7 @@ class SpecModel:
         return gp, res
         #return gp.predict(res, t=self.wav_obs.ravel())+flux_model.ravel()
         #return gp.log_likelihood(res), (gp, res)
+        """
 
 
 class SpecModel2(SpecModel):
@@ -207,6 +244,7 @@ class SpecModel2(SpecModel):
         flux_phys = flux_base * flux_sum / 2.
         return flux_phys
 
+    # same as SpecModel? 
     @partial(jit, static_argnums=(0,))
     def gp_loglikelihood(self, params):
         """ compute model likelihood using GP
@@ -234,6 +272,7 @@ class SpecModel2(SpecModel):
 
         return gp.log_likelihood(res)
 
+    # same as specmodel?
     def gp_predict(self, params):
         """ compute model likelihood using GP
 
