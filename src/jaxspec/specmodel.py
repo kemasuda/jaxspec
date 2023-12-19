@@ -244,7 +244,7 @@ class SpecModel2(SpecModel):
         flux_phys = flux_base * flux_sum / 2.
         return flux_phys
 
-    # same as SpecModel? 
+    ''' same as SpecModel
     @partial(jit, static_argnums=(0,))
     def gp_loglikelihood(self, params):
         """ compute model likelihood using GP
@@ -272,7 +272,6 @@ class SpecModel2(SpecModel):
 
         return gp.log_likelihood(res)
 
-    # same as specmodel?
     def gp_predict(self, params):
         """ compute model likelihood using GP
 
@@ -298,8 +297,9 @@ class SpecModel2(SpecModel):
         res = self.flux_obs[idx].ravel() - flux_model[idx].ravel()
 
         return gp, res
+    '''
 
-    ''' tinygp? 
+    ''' versions using tinygp -> use gpu=True
     @partial(jit, static_argnums=(0,))
     def gp_loglikelihood(self, params):
         """ compute model likelihood using GP
