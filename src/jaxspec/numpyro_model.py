@@ -10,13 +10,14 @@ from celerite2.jax import terms as jax_terms
 from .utils import *
 
 
-def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, 
-        teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False):
+def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2.,
+          teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False):
     """ standard model
     """
     self = sf.sm
 
-    teff = numpyro.sample("teff", dist.Uniform(3500, 7000))
+    teff_scaled = numpyro.sample("teff_scaled", dist.Uniform(0., 1.))
+    teff = numpyro.deterministic("teff", teff_scaled*3500. + 3500.)
     if physical_logg_max:
         logg_max = -2.34638497e-08*teff**2 + 1.58069918e-04*teff + 4.53251890 # valid for 4500-7000K
     else:
@@ -40,11 +41,13 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_
         numpyro.factor("logprior_feh", log_prior)
 
     alpha = numpyro.sample("alpha", dist.Uniform(0., 0.4))
-    vsini = numpyro.sample("vsini", dist.Uniform(0, sf.ccfvbroad))
+    vsini_scaled = numpyro.sample("vsini_scaled", dist.Uniform(0, 1))
+    vsini = numpyro.deterministic("vsini", vsini_scaled * sf.ccfvbroad)
     if empirical_vmacro:
         zeta = numpyro.deterministic("zeta", 3.98 + (teff - 5770.) / 650.)
     else:
-        zeta = numpyro.sample("zeta", dist.Uniform(0., zeta_max))
+        zeta_scaled = numpyro.sample("zeta_scaled", dist.Uniform(0., 1.))
+        zeta = numpyro.deterministic("zeta", zeta_scaled * zeta_max)
     q1 = numpyro.sample("q1", dist.Uniform(0, 1))
     q2 = numpyro.sample("q2", dist.Uniform(0, 1))
     u1 = numpyro.deterministic("u1", 2*jnp.sqrt(q1)*q2)
@@ -52,7 +55,7 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_
 
     ones = jnp.ones(self.Norder)
     if sf.wavresmin[0] == sf.wavresmax[0]:
-        wavres = numpyro.deterministic("res", jnp.array(sf.wavresmin))#[0] * ones)
+        wavres = numpyro.deterministic("res", jnp.array(sf.wavresmin))
     elif single_wavres:
         wavres_single = numpyro.sample("res", dist.Uniform(low=sf.wavresmin[0], high=sf.wavresmax[0]))
         wavres = ones * wavres_single
@@ -62,21 +65,21 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_
     # linear baseline: quadratic is not better
     c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
     c1 = numpyro.sample("slope", dist.Uniform(low=-slope_max*ones, high=slope_max*ones))
-    rv = numpyro.sample("rv", dist.Uniform(low=sf.rvbounds[0]*ones, high=sf.rvbounds[1]*ones))
+    rv_scaled = numpyro.sample("rv_scaled", dist.Uniform(low=ones*0, high=ones))
+    rv = numpyro.deterministic("rv", rv_scaled * (sf.rvbounds[1] - sf.rvbounds[0]) + sf.rvbounds[0])
 
     fluxmodel = numpyro.deterministic("fluxmodel",
         self.fluxmodel_multiorder(c0, c1, teff, logg, feh, alpha, vsini, zeta, wavres, rv, u1, u2)
         )
 
     lna = numpyro.sample("lna", dist.Uniform(low=-5, high=0))
-    lnc = numpyro.sample("lnc", dist.Uniform(low=-5, high=2))
+    lnc = numpyro.sample("lnc", dist.Uniform(low=-5, high=lnc_max))
     kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
     lnsigma = numpyro.sample("lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
     diags = self.error_obs**2 + jnp.exp(2*lnsigma)
 
     mask_all = self.mask_obs + (self.mask_fit > 0)
     idx = ~mask_all
-    # order-by-order gp
     for j in range(len(fluxmodel)):
         idxj = idx[j]
         gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
@@ -239,7 +242,7 @@ def model_sb2_numpyrogp(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30.
     numpyro.sample("obs", dist.MultivariateNormal(loc=0., covariance_matrix=cov), obs=flux_residual)
 
 
-def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True):
+def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True, zeta_max=10., teff_min=3500., teff_max=7000.):
     """ initialize HMC
     """
     params_center = 0.5*(sf.bounds[0]+sf.bounds[1])
@@ -247,6 +250,10 @@ def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True)
     pdict_init = dict(zip(sf.pnames, params_opt_shift))
     if init_order_rv:
         pdict_init['rv'] = jnp.array([np.mean(sf.rvbounds)]*len(sf.ccfrvlist))
+    pdict_init['teff_scaled'] = (pdict_init['teff'] - teff_min) / (teff_max - teff_min)
+    pdict_init['rv_scaled'] = (pdict_init['rv'] - sf.rvbounds[0]) / (sf.rvbounds[1] - sf.rvbounds[0])
+    pdict_init['zeta_scaled'] = pdict_init['zeta'] / zeta_max
+    pdict_init['vsini_scaled'] = pdict_init['vsini'] / sf.ccfvbroad
     del pdict_init['u1'], pdict_init['u2']
     if keys is not None:
         for k, v in zip(keys, vals):
