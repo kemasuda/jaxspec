@@ -57,7 +57,7 @@ class SpecFit:
             assert len(grididx) == 1, "grid data for order %d not found."%orders[i]
             grididx = int(grididx)
             assert np.min(wobs - wavranges[grididx,0]) > wav_margin, "observed wavelengths outside of margin."
-            assert np.min(wavranges[grididx,1] - wobs) > wav_margin, "observed wavelengths of margin."
+            assert np.min(wavranges[grididx,1] - wobs) > wav_margin, "observed wavelengths outside of margin."
             paths_order.append(paths[grididx])
 
         self.sm = SpecModel(SpecGrid(paths_order), wav_obs, flux_obs, error_obs, mask_obs, gpu=gpu)
@@ -132,7 +132,7 @@ class SpecFit:
 
         return ccfrv, vbroad
 
-    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slope_max=0.2):
+    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2):
         vsinimax = self.ccfvbroad
         rvmean = sigma_clipped_stats(self.ccfrvlist)[0]
         if vsinimax < 20:
@@ -150,8 +150,8 @@ class SpecFit:
         else:
             init_params = set_init_params
         #params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, 0.5*(resmin+resmax), rvmean, 0, 0]+[-5, -5, -10.])
-        params_lower = jnp.array([0.8, -slope_max, 3500., 3., -1., 0., vsinimin, zetamin, resmin, rvmin, 0, 0]+[-5, -5, -10.])
-        params_upper = jnp.array([1.2, slope_max, 7000, 5., 0.5, 0.4, vsinimax, zetamax, resmax, rvmax, 0, 0]+[0, 1, lnsigmamax])
+        params_lower = jnp.array([0.8, -slopemax, 3500., 3., -1., 0., vsinimin, zetamin, resmin, rvmin, 0, 0]+[-5, -5, -10.])
+        params_upper = jnp.array([1.2, slopemax, 7000, 5., 0.5, 0.4, vsinimax, zetamax, resmax, rvmax, 0, 0]+[0, 1, lnsigmamax])
         bounds = (params_lower, params_upper)
         self.pnames = pnames
         self.bounds = bounds
@@ -171,7 +171,7 @@ class SpecFit:
         self.params_opt = params
         return params
 
-    def optim_iterate(self, maxiter=10, cut0=5., cut1=3., method="TNC", plot=True, lnsigmamax=-5, slope_max=0.2,
+    def optim_iterate(self, maxiter=10, cut0=5., cut1=3., method="TNC", plot=True, lnsigmamax=-5, slopemax=0.2,
                     teff_prior=None, logg_prior=None, feh_prior=None, **kwargs):
         params_opt = None
         sm = self.sm
@@ -197,7 +197,7 @@ class SpecFit:
         for i in range(maxiter):
             print ("# iteration %d..."%i)
 
-            params_opt = self.optim(solver, set_init_params=params_opt, lnsigmamax=lnsigmamax, slope_max=slope_max)
+            params_opt = self.optim(solver, set_init_params=params_opt, lnsigmamax=lnsigmamax, slopemax=slopemax)
 
             if i==0:
                 cut = cut0
@@ -482,7 +482,7 @@ class SpecFit2(SpecFit):
 
         return rvgrid, medccf
 
-    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None):
+    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2):
         vsinimax = 30.
         rvmin1, rvmax1 = self.v1 - 0.5*vsinimax, self.v1 + 0.5*vsinimax
         dv = self.v2 - self.v1
@@ -497,8 +497,8 @@ class SpecFit2(SpecFit):
             init_params = jnp.array([1, 0]+[6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax]+[6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax]+[0.5*(resmin+resmax), self.v1, dv, 0, 0]+[-3., 0., -8])
         else:
             init_params = set_init_params
-        params_lower = jnp.array([0.8, -0.1]+[3500., 3., -1., 0., vsinimin, zetamin]+[3500., 3., -1., 0., vsinimin, zetamin]+[resmin, rvmin1, dvmin, 0, 0]+[-5, -5, -10.])
-        params_upper = jnp.array([1.2, 0.1]+[7000, 5., 0.5, 0.4, vsinimax, zetamax]+[7000, 5., 0.5, 0.4, vsinimax, zetamax]+[resmax, rvmax1, dvmax, 0, 0]+[0, 1, lnsigmamax])
+        params_lower = jnp.array([0.8, -slopemax]+[3500., 3., -1., 0., vsinimin, zetamin]+[3500., 3., -1., 0., vsinimin, zetamin]+[resmin, rvmin1, dvmin, 0, 0]+[-5, -5, -10.])
+        params_upper = jnp.array([1.2, slopemax]+[7000, 5., 0.5, 0.4, vsinimax, zetamax]+[7000, 5., 0.5, 0.4, vsinimax, zetamax]+[resmax, rvmax1, dvmax, 0, 0]+[0, 1, lnsigmamax])
         bounds = (params_lower, params_upper)
         self.rv1bounds = (rvmin1, rvmax1)
         self.drvbounds = (dvmin, dvmax)
