@@ -482,11 +482,11 @@ class SpecFit2(SpecFit):
 
         return rvgrid, medccf
 
-    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2):
-        vsinimax = 30.
+    def optim(self, solver=None, vsinimin=0., vsinimax=30., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2):
         rvmin1, rvmax1 = self.v1 - 0.5*vsinimax, self.v1 + 0.5*vsinimax
         dv = self.v2 - self.v1
-        dvmin, dvmax = dv * 0., dv * 2
+        #dvmin, dvmax = dv * 0., dv * 2
+        dvmin, dvmax = dv - 0.5*vsinimax, dv + 0.5*vsinimax
         zetamin, zetamax = 0, 10.
         resmin, resmax = np.mean(self.wavresmin), np.mean(self.wavresmax)
 
