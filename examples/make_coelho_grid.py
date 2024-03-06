@@ -42,6 +42,13 @@ d = pd.read_csv("wavranges_gaoes-rv.csv")
 wavfactor = 1. 
 air_or_vac = "air"
 
+#%% input and output directories: HDS red
+data_dir = "/Users/k_masuda/data/s_coelho05/"
+output_dir = "/Users/k_masuda/data/specgrid_hdsred_coelho/"
+d = pd.read_csv("wavranges_hds-red.csv")
+wavfactor = 1. 
+air_or_vac = "air"
+
 #%%
 wmargin = 5 # margin in AA
 for i in range(1, len(d)):
@@ -50,3 +57,5 @@ for i in range(1, len(d)):
     print ("#", wmin_aa, wmax_aa)
     output = compute_grid_coelho(model_params, wmin_aa, wmax_aa, data_dir=data_dir, output_dir=output_dir, air_or_vac=air_or_vac)
 
+
+# %%
