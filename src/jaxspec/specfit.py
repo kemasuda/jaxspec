@@ -4,7 +4,8 @@ __all__ = ["SpecFit", "SpecFit2"] #"grid_wavranges_paths"
 import numpy as np
 import jax.numpy as jnp
 import glob, re
-from jax.config import config
+#from jax.config import config
+from jax import config
 config.update('jax_enable_x64', True)
 
 from .utils import *
@@ -475,14 +476,15 @@ class SpecFit2(SpecFit):
         dccf = medccf/np.max(medccf) - 0.5
         dccfderiv = dccf[1:] * dccf[:-1]
         v50 = rvgrid[1:][dccfderiv<0]
-        vbroad = np.max(v50) - np.min(v50)
+        vbroad = np.max(v50) - np.min(v50) - dvopt # sum of HWHMs
 
         self.ccfrvlist = ccfrvs
         self.ccfvbroad = vbroad
 
         return rvgrid, medccf
 
-    def optim(self, solver=None, vsinimin=0., vsinimax=30., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2):
+    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2):
+        vsinimax = self.ccfvbroad
         rvmin1, rvmax1 = self.v1 - 0.5*vsinimax, self.v1 + 0.5*vsinimax
         dv = self.v2 - self.v1
         #dvmin, dvmax = dv * 0., dv * 2
