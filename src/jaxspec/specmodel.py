@@ -219,17 +219,18 @@ class SpecModel2(SpecModel):
         wavres = params_phys[14]
         rv1 = params_phys[15]
         rv2 = params_phys[15] + params_phys[16]
-        u1, u2 = params_phys[-2:]
+        u1, u2 = params_phys[16], params_phys[17]
+        f2_f1 = params_phys[18]
         flux_raw1 = self.sg.values(teff1, logg1, feh1, alpha1, self.wavgrid)
         flux_raw2 = self.sg.values(teff2, logg2, feh2, alpha2, self.wavgrid)
-        flux_sum = broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw1, vsini1, zeta1, get_beta(wavres), rv1, self.varr, u1, u2) + broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw2, vsini2, zeta2, get_beta(wavres), rv2, self.varr, u1, u2)
+        flux_sum = broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw1, vsini1, zeta1, get_beta(wavres), rv1, self.varr, u1, u2) + f2_f1 * broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw2, vsini2, zeta2, get_beta(wavres), rv2, self.varr, u1, u2)
         flux_base = c0 + c1 * (wav_out - jnp.mean(self.wav_obs, axis=1)[:,jnp.newaxis]) / self.wav_obs_range[:,jnp.newaxis]
-        flux_phys = flux_base * flux_sum / 2.
+        flux_phys = flux_base * flux_sum / (1. + f2_f1)
         return flux_phys
 
     @partial(jit, static_argnums=(0,))
     def fluxmodel_multiorder(self, c0, c1, teff1, teff2, logg1, logg2, feh1, feh2,
-                            alpha1, alpha2, vsini1, vsini2, zeta1, zeta2, res, rv1, rv2, u1, u2):
+                            alpha1, alpha2, vsini1, vsini2, zeta1, zeta2, res, rv1, rv2, u1, u2, f2_f1):
         """ broadened & shifted flux model; including order-dependent linear continua
 
             Returns:
@@ -240,8 +241,8 @@ class SpecModel2(SpecModel):
         flux_raw1 = self.sg.values(teff1, logg1, feh1, alpha1, self.wavgrid)
         flux_raw2 = self.sg.values(teff2, logg2, feh2, alpha2, self.wavgrid)
         flux_base = c0[:,jnp.newaxis] + c1[:,jnp.newaxis] * (wav_out - jnp.mean(self.wav_obs, axis=1)[:,jnp.newaxis]) / self.wav_obs_range[:,jnp.newaxis]
-        flux_sum = broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw1, vsini1, zeta1, get_beta(res), rv1, self.varr, u1, u2) + broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw2, vsini2, zeta2, get_beta(res), rv2, self.varr, u1, u2)
-        flux_phys = flux_base * flux_sum / 2.
+        flux_sum = broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw1, vsini1, zeta1, get_beta(res), rv1, self.varr, u1, u2) + f2_f1 * broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw2, vsini2, zeta2, get_beta(res), rv2, self.varr, u1, u2)
+        flux_phys = flux_base * flux_sum / (1. + f2_f1)
         return flux_phys
 
     ''' same as SpecModel
