@@ -117,7 +117,7 @@ def compute_grid_coelho(model_params, wmin, wmax, data_dir, output_dir, fixed_wa
     if not os.path.exists(output_dir):
         pathlib.Path(output_dir).mkdir()
 
-    np.savez(outname, tgrid=tgrid, ggrid=ggrid, fgrid=fgrid, agrid=agrid, wavgrid=wavarr, flux=pgrids2d[0])
+    np.savez(outname, tgrid=tgrid, ggrid=ggrid, fgrid=fgrid, agrid=agrid, wavgrid=wavarr, flux=pgrids2d[0].astype(np.float32))
     print ("spectrum grid saved to %s."%outname)
     print ()
 
@@ -185,7 +185,7 @@ def compute_grid_ispec(wmin, wmax, data_dir, output_dir, wavgrid_length=5000, ai
     if not os.path.exists(output_dir):
         pathlib.Path(output_dir).mkdir()
 
-    np.savez(outname, tgrid=tgrid, ggrid=ggrid, fgrid=fgrid, agrid=agrid, wavgrid=wavarr, flux=pgrids2d[0])
+    np.savez(outname, tgrid=tgrid, ggrid=ggrid, fgrid=fgrid, agrid=agrid, wavgrid=wavarr, flux=pgrids2d[0].astype(np.float32))
     print ("spectrum grid saved to %s."%outname)
     print ()
 
