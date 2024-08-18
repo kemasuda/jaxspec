@@ -2,6 +2,7 @@ __all__ = ["rotmacrokernel"]
 
 import jax.numpy as jnp
 from jax import jit
+from jax.scipy.integrate import trapezoid as trapz
 
 RP = jnp.array([-4.79443220978201773821E9, 1.95617491946556577543E12, -2.49248344360967716204E14, 9.70862251047306323952E15])
 RQ = jnp.array([1., 4.99563147152651017219E2, 1.73785401676374683123E5, 4.84409658339962045305E7, 1.11855537045356834862E10, 2.11277520115489217587E12, 3.10518229857422583814E14, 3.18121955943204943306E16, 1.71086294081043136091E18])
@@ -58,7 +59,7 @@ def rotmacrokernel(varr, zeta, vsini, u1, u2, beta, Nt=1000):
     rt = jnp.exp(-piz2*sig2*omint2) + jnp.exp(-piz2*sig2*t2)
     ip = jnp.exp(-2*jnp.pi*jnp.pi*beta*beta*sig2)
     ys = ldfactor * rt * ip * J0(2*jnp.pi*sigmas*vsini*t) * t
-    kernel_ft = jnp.trapz(ys.T)
+    kernel_ft = trapz(ys.T)
 
     kernel = jnp.fft.fft(kernel_ft)
     kernel = jnp.real(kernel)
