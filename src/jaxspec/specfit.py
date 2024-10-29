@@ -133,7 +133,7 @@ class SpecFit:
 
         return ccfrv, vbroad
 
-    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2):
+    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2, loggmin=3., fit_dilution=False):
         vsinimax = self.ccfvbroad
         rvmean = sigma_clipped_stats(self.ccfrvlist)[0]
         if vsinimax < 20:
@@ -144,15 +144,19 @@ class SpecFit:
         zetamin, zetamax = 0, 10.
         resmin, resmax = np.mean(self.wavresmin), np.mean(self.wavresmax)
 
-        pnames = ['c0', 'c1', 'teff', 'logg', 'feh', 'alpha', 'vsini', 'zeta', 'wavres', 'rv', 'u1', 'u2', 'lna', 'lnc', 'lnsigma']
+        pnames = ['c0', 'c1', 'teff', 'logg', 'feh', 'alpha', 'vsini', 'zeta', 'wavres', 'rv', 'u1', 'u2', 'dilution', 'lna', 'lnc', 'lnsigma']
+        if fit_dilution:
+            dilutionmin, dilutionmax = 0., 1.
+        else:
+            dilutionmin, dilutionmax = 0., 0.
         if set_init_params is None:
             #init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, resmin, rvmin, 0, 0]+[-3., 0., -8])
-            init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, 0.5*(resmin+resmax), rvmean, 0, 0]+[-3., 0., -8])
+            init_params = jnp.array([1, 0, 6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax, 0.5*(resmin+resmax), rvmean, 0, 0, 0.5*(dilutionmin+dilutionmax)]+[-3., 0., -8])
         else:
             init_params = set_init_params
         #params_lower = jnp.array([0.8, -0.1, 3500., 3., -1., 0., vsinimin, zetamin, 0.5*(resmin+resmax), rvmean, 0, 0]+[-5, -5, -10.])
-        params_lower = jnp.array([0.8, -slopemax, 3500., 3., -1., 0., vsinimin, zetamin, resmin, rvmin, 0, 0]+[-5, -5, -10.])
-        params_upper = jnp.array([1.2, slopemax, 7000, 5., 0.5, 0.4, vsinimax, zetamax, resmax, rvmax, 0, 0]+[0, 1, lnsigmamax])
+        params_lower = jnp.array([0.8, -slopemax, 3500., loggmin, -1., 0., vsinimin, zetamin, resmin, rvmin, 0, 0, dilutionmin]+[-5, -5, -10.])
+        params_upper = jnp.array([1.2, slopemax, 7000, 5., 0.5, 0.4, vsinimax, zetamax, resmax, rvmax, 0, 0, dilutionmax]+[0, 1, lnsigmamax])
         bounds = (params_lower, params_upper)
         self.pnames = pnames
         self.bounds = bounds
@@ -172,7 +176,7 @@ class SpecFit:
         self.params_opt = params
         return params
 
-    def optim_iterate(self, maxiter=10, cut0=5., cut1=3., method="TNC", plot=True, lnsigmamax=-5, slopemax=0.2,
+    def optim_iterate(self, maxiter=10, cut0=5., cut1=3., method="TNC", plot=True, lnsigmamax=-5, slopemax=0.2, loggmin=3., fit_dilution=False,
                     teff_prior=None, logg_prior=None, feh_prior=None, **kwargs):
         params_opt = None
         sm = self.sm
@@ -198,7 +202,7 @@ class SpecFit:
         for i in range(maxiter):
             print ("# iteration %d..."%i)
 
-            params_opt = self.optim(solver, set_init_params=params_opt, lnsigmamax=lnsigmamax, slopemax=slopemax)
+            params_opt = self.optim(solver, set_init_params=params_opt, lnsigmamax=lnsigmamax, slopemax=slopemax, loggmin=loggmin, fit_dilution=fit_dilution)
 
             if i==0:
                 cut = cut0

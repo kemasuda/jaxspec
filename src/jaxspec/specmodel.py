@@ -65,14 +65,15 @@ class SpecModel:
                 flux values (Norder, Npix) at wav_out
 
         """
-        c0, c1, teff, logg, feh, alpha, vsini, zeta, wavres, rv, u1, u2 = params_phys
+        c0, c1, teff, logg, feh, alpha, vsini, zeta, wavres, rv, u1, u2, dilution = params_phys
         flux_raw = self.sg.values(teff, logg, feh, alpha, self.wavgrid)
         flux_base = c0 + c1 * (wav_out - jnp.mean(self.wav_obs, axis=1)[:,jnp.newaxis]) / self.wav_obs_range[:,jnp.newaxis]
-        flux_phys = flux_base * broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(wavres), rv, self.varr, u1, u2)
+        #flux_phys = flux_base * broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(wavres), rv, self.varr, u1, u2)
+        flux_phys = flux_base * ( (1 - dilution) * broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(wavres), rv, self.varr, u1, u2) + dilution )
         return flux_phys
 
     @partial(jit, static_argnums=(0,))
-    def fluxmodel_multiorder(self, c0, c1, teff, logg, feh, alpha, vsini, zeta, res, rv, u1, u2):
+    def fluxmodel_multiorder(self, c0, c1, teff, logg, feh, alpha, vsini, zeta, res, rv, u1, u2, dilution):
         """ broadened & shifted flux model; including order-dependent linear continua
 
             Returns:
@@ -82,7 +83,7 @@ class SpecModel:
         wav_out = self.wav_obs
         flux_raw = self.sg.values(teff, logg, feh, alpha, self.wavgrid)
         flux_base = c0[:,jnp.newaxis] + c1[:,jnp.newaxis] * (wav_out - jnp.mean(self.wav_obs, axis=1)[:,jnp.newaxis]) / self.wav_obs_range[:,jnp.newaxis]
-        flux_phys = flux_base * broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(res), rv, self.varr, u1, u2)
+        flux_phys = flux_base * ( (1 - dilution) * broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(res), rv, self.varr, u1, u2) + dilution )
         return flux_phys
 
     @partial(jit, static_argnums=(0,))

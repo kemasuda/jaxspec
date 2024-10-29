@@ -44,6 +44,24 @@ def J0(x):
 # Hirano et al. (2011) ApJ 742, 69
 # unlike in the paper, beta here is the Gaussian width
 def rotmacrokernel(varr, zeta, vsini, u1, u2, beta, Nt=1000):
+    """broadening kernel due to ragial-tangential macroturbulence & vsini
+    from Hirano et al. (2011) ApJ 742, 69, Appendix A, B
+
+        Args:
+            varr: velocities at which kernel is evaluated (length should be odd)
+            zeta: macroturbulence dispersion
+            vsini: projected rotation velocity
+            u1, u2: quadratic limb-darekning coefficient
+            beta: additional Gaussian broadening (e.g., IP)
+                NOTE: in Hirano+(2011), beta is introduced following Eq.(14), 
+                where beta is not a normal scale parameter of a Gaussian (sqrt(2) larger).
+                beta in this function *is* defined as a scale parameter (standard deviation) of a Gaussian.
+            Nt: length of grid to evalulate Fourier transform
+
+        Returns:
+            kernel whose sum is normalized to unity
+    
+    """
     tarr = jnp.linspace(0, 1, Nt)
 
     n, dv = len(varr), jnp.median(jnp.diff(varr))
@@ -55,9 +73,9 @@ def rotmacrokernel(varr, zeta, vsini, u1, u2, beta, Nt=1000):
     sig2 = sigmas * sigmas
     omint2 = 1. - t2
     projd = jnp.sqrt(omint2)
-    ldfactor = (1. - (1. - projd) * (u1 + u2*(1. - projd))) / (1. - u1/3. - u2/6.)
-    rt = jnp.exp(-piz2*sig2*omint2) + jnp.exp(-piz2*sig2*t2)
-    ip = jnp.exp(-2*jnp.pi*jnp.pi*beta*beta*sig2)
+    ldfactor = (1. - (1. - projd) * (u1 + u2*(1. - projd))) / (1. - u1/3. - u2/6.) # limb-darkening
+    rt = jnp.exp(-piz2*sig2*omint2) + jnp.exp(-piz2*sig2*t2) # macroturbulence
+    ip = jnp.exp(-2*jnp.pi*jnp.pi*beta*beta*sig2) # instrumental profile (another convolution w/ Gaussian)
     ys = ldfactor * rt * ip * J0(2*jnp.pi*sigmas*vsini*t) * t
     kernel_ft = trapz(ys.T)
 

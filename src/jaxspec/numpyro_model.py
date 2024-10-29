@@ -10,8 +10,8 @@ from celerite2.jax import terms as jax_terms
 from .utils import *
 
 
-def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2.,
-          teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False):
+def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False,
+          teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False, save_pred=False):
     """ standard model
     """
     self = sf.sm
@@ -22,7 +22,7 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_
         logg_max = -2.34638497e-08*teff**2 + 1.58069918e-04*teff + 4.53251890 # valid for 4500-7000K
     else:
         logg_max = 5.
-    logg = numpyro.sample("logg", dist.Uniform(3., logg_max))
+    logg = numpyro.sample("logg", dist.Uniform(logg_min, logg_max))
     feh = numpyro.sample("feh", dist.Uniform(-1, 0.5))
 
     if teff_prior is not None:
@@ -68,8 +68,14 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_
     rv_scaled = numpyro.sample("rv_scaled", dist.Uniform(low=ones*0, high=ones))
     rv = numpyro.deterministic("rv", rv_scaled * (sf.rvbounds[1] - sf.rvbounds[0]) + sf.rvbounds[0])
 
+    # dilution
+    if fit_dilution:
+        dilution = numpyro.sample("dilution", dist.Uniform())
+    else:
+        dilution = numpyro.deterministic("dilution", teff*0.)
+
     fluxmodel = numpyro.deterministic("fluxmodel",
-        self.fluxmodel_multiorder(c0, c1, teff, logg, feh, alpha, vsini, zeta, wavres, rv, u1, u2)
+        self.fluxmodel_multiorder(c0, c1, teff, logg, feh, alpha, vsini, zeta, wavres, rv, u1, u2, dilution)
         )
 
     lna = numpyro.sample("lna", dist.Uniform(low=-5, high=0))
@@ -86,6 +92,8 @@ def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_
         gp.compute(self.wav_obs[j][idxj], diag=diags[j][idxj])
         flux_residual = numpyro.deterministic("flux_residual%d"%j, self.flux_obs[j][idxj] - fluxmodel[j][idxj])
         numpyro.sample("obs%d"%j, gp.numpyro_dist(), obs=flux_residual)
+        if save_pred:
+            numpyro.deterministic("pred%d"%j, gp.predict(flux_residual, t=self.wav_obs[j]))
     """
     gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
     gp.compute(self.wav_obs[idx].ravel(), diag=diags[idx].ravel())
