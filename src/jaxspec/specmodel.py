@@ -51,7 +51,7 @@ class SpecModel:
         return self.sgvalues(teff, logg, feh, alpha)
 
     @partial(jit, static_argnums=(0,))
-    def fluxmodel(self, wav_out, params_phys):
+    def fluxmodel(self, wav_out, par):
         """ broadened & shifted flux model; including a common linear continuum
 
             Args:
@@ -65,23 +65,28 @@ class SpecModel:
                 flux values (Norder, Npix) at wav_out
 
         """
-        c0, c1, teff, logg, feh, alpha, vsini, zeta, wavres, rv, u1, u2, dilution = params_phys
+        c0, c1, teff, logg, feh, alpha, vsini, zeta, wavres, rv, u1, u2, dilution \
+            = par["norm"], par["slope"], par["teff"], par["logg"], par["feh"], par["alpha"], par["vsini"], par["zeta"], par['wavres'], par["rv"], par['u1'], par['u2'], par['dilution']
         flux_raw = self.sg.values(teff, logg, feh, alpha, self.wavgrid)
         flux_base = c0 + c1 * (wav_out - jnp.mean(self.wav_obs, axis=1)[:,jnp.newaxis]) / self.wav_obs_range[:,jnp.newaxis]
-        #flux_phys = flux_base * broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(wavres), rv, self.varr, u1, u2)
         flux_phys = flux_base * ( (1 - dilution) * broaden_and_shift_vmap(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(wavres), rv, self.varr, u1, u2) + dilution )
         return flux_phys
 
     @partial(jit, static_argnums=(0,))
-    def fluxmodel_multiorder(self, c0, c1, teff, logg, feh, alpha, vsini, zeta, res, rv, u1, u2, dilution):
+    def fluxmodel_multiorder(self, par):
         """ broadened & shifted flux model; including order-dependent linear continua
 
             Returns:
                 flux model (Norder, Npix) at wav_obs
 
         """
+        c0, c1, teff, logg, feh, alpha, vsini, zeta, res, rv, u1, u2, dilution \
+            = par["norm"], par["slope"], par["teff"], par["logg"], par["feh"], par["alpha"], par["vsini"], par["zeta"], par['wavres'], par["rv"], par['u1'], par['u2'], par['dilution']
         wav_out = self.wav_obs
-        flux_raw = self.sg.values(teff, logg, feh, alpha, self.wavgrid)
+        if self.sg.model == 'bosz':
+            flux_raw = self.sg.values(teff, logg, feh, alpha, par['carbon'], par['vmic'], self.wavgrid)
+        else:  
+            flux_raw = self.sg.values(teff, logg, feh, alpha, self.wavgrid)
         flux_base = c0[:,jnp.newaxis] + c1[:,jnp.newaxis] * (wav_out - jnp.mean(self.wav_obs, axis=1)[:,jnp.newaxis]) / self.wav_obs_range[:,jnp.newaxis]
         flux_phys = flux_base * ( (1 - dilution) * broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw, vsini, zeta, get_beta(res), rv, self.varr, u1, u2) + dilution )
         return flux_phys

@@ -9,12 +9,14 @@ from jax import config
 config.update('jax_enable_x64', True)
 
 from .utils import *
-from .specgrid import SpecGrid
+from .specgrid import SpecGrid, SpecGridBosz
 from .specmodel import SpecModel, SpecModel2
 from astropy.stats import sigma_clipped_stats
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import jaxopt
+from scipy.signal import medfilt
+from scipy.stats import median_abs_deviation as mad
 
 
 def get_grid_wavranges_and_paths(gridpath):
@@ -42,11 +44,12 @@ def get_grid_wavranges_and_paths(gridpath):
             wavranges_grid.append(result.group(1).split("-"))
         paths.append(gridfile)
     wavranges_grid = np.array(wavranges_grid).astype(float)
+    assert len(wavranges_grid), "Spectrum grid files not found."
     return wavranges_grid, paths
 
 
 class SpecFit:
-    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., gpu=False):
+    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., gpu=False, model='coelho'):
         wav_obs, flux_obs, error_obs, mask_obs = data
         assert np.shape(wav_obs)[0] == len(orders)
 
@@ -61,7 +64,11 @@ class SpecFit:
             assert np.min(wavranges[grididx,1] - wobs) > wav_margin, "observed wavelengths outside of margin."
             paths_order.append(paths[grididx])
 
-        self.sm = SpecModel(SpecGrid(paths_order), wav_obs, flux_obs, error_obs, mask_obs, gpu=gpu)
+        if model=='bosz':
+            _sg = SpecGridBosz(paths_order)
+        else:
+            _sg = SpecGrid(paths_order)
+        self.sm = SpecModel(_sg, wav_obs, flux_obs, error_obs, mask_obs, vmax=vmax, gpu=gpu)
         self.orders = orders
         self.wavresmin = [70000.]*len(orders)
         self.wavresmax = [70000.]*len(orders)
@@ -71,6 +78,7 @@ class SpecFit:
         self.params_opt = None
         self.pnames = None
         self.bounds = None
+        self.vmax = vmax
 
     """
     def add_wavresinfo(self, resfile):
@@ -87,8 +95,8 @@ class SpecFit:
         assert len(res_min) == len(self.orders)
         assert len(res_max) == len(self.orders)
         assert np.min(res_max - res_min) >= 0.
-        self.wavresmin = res_min
-        self.wavresmax = res_max
+        self.wavresmin = np.array(res_min).astype(float)
+        self.wavresmax = np.array(res_max).astype(float)
 
     #def ziplist(self):
     #    return zip(self.sm.wav_obs, self.sm.flux_obs, self.sm.error_obs, self.sm.mask_obs, self.orders)
@@ -96,7 +104,11 @@ class SpecFit:
     def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., output_dir=None, ccfvmax=100., tag=''):
         vgrids, ccfs, ccffuncs = [], [], []
         sm = self.sm
-        wmodels, fmodels = sm.wavgrid, sm.sgvalues(teff, logg, feh, alpha)
+        #wmodels, fmodels = sm.wavgrid, sm.sgvalues(teff, logg, feh, alpha)
+        if sm.sg.model == 'bosz':
+            wmodels, fmodels = sm.wavgrid, sm.sg.values(teff, logg, feh, alpha, 0., 1., sm.wavgrid)
+        else:
+            wmodels, fmodels = sm.wavgrid, sm.sg.values(teff, logg, feh, alpha, sm.wavgrid)
         for wobs, fobs, eobs, mobs, mfit, order, wmodel, fmodel in zip(sm.wav_obs, sm.flux_obs, sm.error_obs, sm.mask_obs, sm.mask_fit, self.orders, wmodels, fmodels):
             print ("# order %d"%order)
             mask = mobs + (mfit > 0.)
@@ -130,6 +142,8 @@ class SpecFit:
 
         self.ccfrvlist = ccfrvs
         self.ccfvbroad = vbroad
+
+        assert vbroad < self.vmax, f"vmax {self.vmax} should be sufficiently larger than line width {vbroad}; instantiate the SpecFit class again."
 
         return ccfrv, vbroad
 
@@ -360,14 +374,10 @@ class SpecFit:
                 plt.savefig(output_dir+name, dpi=200, bbox_inches="tight")
                 plt.close()
 
-    def check_residuals(self, output_dir=None, tag=''):
-        if self.params_opt is None:
-            print ("run optim() or optim_iterate() first.")
-            return None
+    def check_residuals(self, par_dict, output_dir=None, tag=''):
         sm = self.sm
-        #ms = sm.fluxmodel(self.params_opt[:-3], observed=True)
-        ms = sm.fluxmodel(sm.wav_obs, self.params_opt[:-3])
-        residuals = np.array(sm.flux_obs - ms)
+        ms = sm.fluxmodel_multiorder(par_dict)
+        residuals = np.array(sm.flux_obs - ms) / self.sm.error_obs
 
         for res, mobs, mfit, order in zip(residuals, sm.mask_obs, sm.mask_fit, self.orders):
             idx = (~mobs) & (mfit==0.)
@@ -387,6 +397,31 @@ class SpecFit:
             if output_dir is not None:
                 plt.savefig(output_dir+"residual%s_order%02d.png"%(tag,order), dpi=200, bbox_inches="tight")
                 plt.close()
+
+    def mask_outliers(self, p_fit, sigma_threshold=5., plot=False, offset=0.5):
+        for i in range(self.sm.Norder):       
+            x, y, err = self.sm.wav_obs[i], self.sm.flux_obs[i], self.sm.error_obs[i]
+            clip = self.sm.mask_obs[i]
+            yres_phys = y - p_fit['fluxmodel'][i]
+            npix_vsini = int(np.median(x) * p_fit['vsini'] * 2 / 3e5 / np.median(np.diff(x))) * 4 + 1
+            yres_phys_smoothed = medfilt(yres_phys, kernel_size=npix_vsini)
+            yres_res = (yres_phys - yres_phys_smoothed) / err
+            sigma_cut = 1.4826 * mad(yres_res[~clip])
+            flag_outlier = (np.abs(yres_res) > sigma_threshold * sigma_cut) & (~clip) # mask_obs and mask_fit are exclusive
+
+            self.sm.mask_fit[i] += np.array(flag_outlier).astype(float)
+
+            if not plot:
+                continue
+
+            plt.figure()
+            plt.plot(x[~clip], y[~clip], 'o', color='gray', mfc='none', lw=1, markersize=3, alpha=0.6)
+            plt.plot(x, p_fit['fluxmodel'][i], color='C1', zorder=-1000)
+            plt.plot(x[~clip], yres_phys[~clip]+offset, 'o', color='gray', mfc='none', lw=1, markersize=3, alpha=0.6)
+            plt.plot(x[~clip], yres_phys_smoothed[~clip]+offset, '-', color='k', lw=1)
+            plt.plot(x[~clip&(flag_outlier)], yres_phys[~clip&(flag_outlier)]+offset, 'o', color='salmon', lw=1, markersize=3)
+
+        return None
 
 
 class SpecFit2(SpecFit):
