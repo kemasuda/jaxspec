@@ -1,111 +1,97 @@
-__all__ = ["model", "model_sb2", "initialize_HMC", "get_mean_models", "model_sb2_numpyrogp"]
+__all__ = ["model_single", "model_sb2", "initialize_HMC",
+           "get_mean_models", "model_sb2_numpyrogp"]
 
 import jax.numpy as jnp
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
+import tinygp
 from numpyro.infer import init_to_value
 import celerite2
 from celerite2.jax import terms as jax_terms
 from .utils import *
 
 
-def model(sf, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False,
-          teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False, save_pred=False):
+def model_single(sf, param_bounds, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False, physical_logg_max=False, save_pred=False):
     """ standard model
     """
-    self = sf.sm
+    _sm = sf.sm
+    par = {}
 
-    teff_scaled = numpyro.sample("teff_scaled", dist.Uniform(0., 1.))
-    teff = numpyro.deterministic("teff", teff_scaled*3500. + 3500.)
+    for key in param_bounds.keys():
+        if key == 'logg' and physical_logg_max:
+            continue
+        if key == 'zeta' and empirical_vmacro:
+            continue
+        if key == 'wavres':
+            continue
+        par[key+"_scaled"] = numpyro.sample(key+"_scaled", dist.Uniform(
+            jnp.zeros_like(param_bounds[key][0]), jnp.ones_like(param_bounds[key][0])))
+        par[key] = numpyro.deterministic(
+            key, par[key+"_scaled"] * (param_bounds[key][1] - param_bounds[key][0]) + param_bounds[key][0])
+
     if physical_logg_max:
-        logg_max = -2.34638497e-08*teff**2 + 1.58069918e-04*teff + 4.53251890 # valid for 4500-7000K
-    else:
-        logg_max = 5.
-    logg = numpyro.sample("logg", dist.Uniform(logg_min, logg_max))
-    feh = numpyro.sample("feh", dist.Uniform(-1, 0.5))
+        logg_max = -2.34638497e-08 * \
+            par["teff"]**2 + 1.58069918e-04*par["teff"] + \
+            4.53251890  # valid for 4500-7000K
+        par["logg"] = numpyro.sample(
+            "logg", dist.Uniform(param_bounds["logg"][0], logg_max))
 
-    if teff_prior is not None:
-        mu, sig = teff_prior
-        log_prior = -0.5 * (teff - mu)**2 / sig**2
-        numpyro.factor("logprior_teff", log_prior)
-
-    if logg_prior is not None:
-        mu, sig = logg_prior
-        log_prior = -0.5 * (logg - mu)**2 / sig**2
-        numpyro.factor("logprior_logg", log_prior)
-
-    if feh_prior is not None:
-        mu, sig = feh_prior
-        log_prior = -0.5 * (feh - mu)**2 / sig**2
-        numpyro.factor("logprior_feh", log_prior)
-
-    alpha = numpyro.sample("alpha", dist.Uniform(0., 0.4))
-    vsini_scaled = numpyro.sample("vsini_scaled", dist.Uniform(0, 1))
-    vsini = numpyro.deterministic("vsini", vsini_scaled * sf.ccfvbroad)
     if empirical_vmacro:
-        zeta = numpyro.deterministic("zeta", 3.98 + (teff - 5770.) / 650.)
-    else:
-        zeta_scaled = numpyro.sample("zeta_scaled", dist.Uniform(0., 1.))
-        zeta = numpyro.deterministic("zeta", zeta_scaled * zeta_max)
-    q1 = numpyro.sample("q1", dist.Uniform(0, 1))
-    q2 = numpyro.sample("q2", dist.Uniform(0, 1))
-    u1 = numpyro.deterministic("u1", 2*jnp.sqrt(q1)*q2)
-    u2 = numpyro.deterministic("u2", jnp.sqrt(q1)-u1)
+        zeta = numpyro.deterministic(
+            "zeta", 3.98 + (par["teff"] - 5770.) / 650.)
 
-    ones = jnp.ones(self.Norder)
-    if sf.wavresmin[0] == sf.wavresmax[0]:
-        wavres = numpyro.deterministic("res", jnp.array(sf.wavresmin))
+    par['u1'] = numpyro.deterministic("u1", 2*jnp.sqrt(par["q1"])*par["q2"])
+    par['u2'] = numpyro.deterministic("u2", jnp.sqrt(par["q1"])-par["u1"])
+
+    ones = jnp.ones(_sm.Norder)
+    # wavres_min = wavres_max
+    if param_bounds['wavres'][0][0] == param_bounds['wavres'][1][0]:
+        par['wavres'] = numpyro.deterministic(
+            "wavres", param_bounds['wavres'][0])
+    # wavres_min != wavres_max, order-independent wavres
     elif single_wavres:
-        wavres_single = numpyro.sample("res", dist.Uniform(low=sf.wavresmin[0], high=sf.wavresmax[0]))
-        wavres = ones * wavres_single
+        wavres_single = numpyro.sample("wavres", dist.Uniform(
+            low=param_bounds['wavres'][0][0], high=param_bounds['wavres'][1][0]))
+        par['wavres'] = ones * wavres_single
+    # wavres_min != wavres_max, order-dependent wavres
     else:
-        wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf.wavresmin), high=jnp.array(sf.wavresmax))) # output shape becomes () when the name is "wavres"...????
-
-    # linear baseline: quadratic is not better
-    c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
-    c1 = numpyro.sample("slope", dist.Uniform(low=-slope_max*ones, high=slope_max*ones))
-    rv_scaled = numpyro.sample("rv_scaled", dist.Uniform(low=ones*0, high=ones))
-    rv = numpyro.deterministic("rv", rv_scaled * (sf.rvbounds[1] - sf.rvbounds[0]) + sf.rvbounds[0])
+        par['wavres'] = numpyro.sample("wavres", dist.Uniform(
+            low=param_bounds['wavres'][0], high=param_bounds['wavres'][1]))
 
     # dilution
     if fit_dilution:
-        dilution = numpyro.sample("dilution", dist.Uniform())
+        par['dilution'] = numpyro.sample("dilution", dist.Uniform())
     else:
-        dilution = numpyro.deterministic("dilution", teff*0.)
+        par['dilution'] = numpyro.deterministic("dilution", par['teff']*0.)
 
-    fluxmodel = numpyro.deterministic("fluxmodel",
-        self.fluxmodel_multiorder(c0, c1, teff, logg, feh, alpha, vsini, zeta, wavres, rv, u1, u2, dilution)
-        )
+    fluxmodel = numpyro.deterministic(
+        "fluxmodel", _sm.fluxmodel_multiorder(par))
 
-    lna = numpyro.sample("lna", dist.Uniform(low=-5, high=0))
+    lna = numpyro.sample("lna", dist.Uniform(low=-5, high=-0.5))
     lnc = numpyro.sample("lnc", dist.Uniform(low=-5, high=lnc_max))
     kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
-    lnsigma = numpyro.sample("lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
-    diags = self.error_obs**2 + jnp.exp(2*lnsigma)
+    lnsigma = numpyro.sample(
+        "lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
+    diags = _sm.error_obs**2 + jnp.exp(2*lnsigma)
 
-    mask_all = self.mask_obs + (self.mask_fit > 0)
+    mask_all = _sm.mask_obs + (_sm.mask_fit > 0)
     idx = ~mask_all
     for j in range(len(fluxmodel)):
         idxj = idx[j]
         gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
-        gp.compute(self.wav_obs[j][idxj], diag=diags[j][idxj])
-        flux_residual = numpyro.deterministic("flux_residual%d"%j, self.flux_obs[j][idxj] - fluxmodel[j][idxj])
-        numpyro.sample("obs%d"%j, gp.numpyro_dist(), obs=flux_residual)
+        gp.compute(_sm.wav_obs[j][idxj], diag=diags[j][idxj])
+        flux_residual = numpyro.deterministic(
+            "flux_residual%d" % j, _sm.flux_obs[j][idxj] - fluxmodel[j][idxj])
+        numpyro.sample("obs%d" % j, gp.numpyro_dist(), obs=flux_residual)
         if save_pred:
-            numpyro.deterministic("pred%d"%j, gp.predict(flux_residual, t=self.wav_obs[j]))
-    """
-    gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
-    gp.compute(self.wav_obs[idx].ravel(), diag=diags[idx].ravel())
-    flux_residual = numpyro.deterministic("flux_residual", self.flux_obs[idx].ravel() - fluxmodel[idx].ravel())
-    numpyro.sample("obs", gp.numpyro_dist(), obs=flux_residual)
-    """
-
+            numpyro.deterministic("pred%d" % j, gp.predict(
+                flux_residual, t=_sm.wav_obs[j]))
 
 
 def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_wavres=False,
-        rv1bounds=None, drvbounds=None,
-        teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False, lncmin=-5):
+              rv1bounds=None, drvbounds=None,
+              teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False, lncmin=-5):
     """ SB2 model
     """
     self = sf.sm
@@ -113,7 +99,8 @@ def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_w
     teff1 = numpyro.sample("teff1", dist.Uniform(3500, 7000))
     teff2 = numpyro.sample("teff2", dist.Uniform(3500, 7000))
     if physical_logg_max:
-        logg_max1 = -2.34638497e-08*teff1**2 + 1.58069918e-04*teff1 + 4.53251890 # valid for 4500-7000K
+        logg_max1 = -2.34638497e-08*teff1**2 + 1.58069918e-04 * \
+            teff1 + 4.53251890  # valid for 4500-7000K
         logg_max2 = -2.34638497e-08*teff2**2 + 1.58069918e-04*teff2 + 4.53251890
     else:
         logg_max1, logg_max2 = 5., 5.
@@ -139,23 +126,27 @@ def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_w
 
     ones = jnp.ones(self.Norder)
     if sf.wavresmin[0] == sf.wavresmax[0]:
-        wavres = numpyro.deterministic("res", jnp.array(sf.wavresmin))#[0] * ones)
+        wavres = numpyro.deterministic(
+            "res", jnp.array(sf.wavresmin))  # [0] * ones)
     elif single_wavres:
-        wavres_single = numpyro.sample("res", dist.Uniform(low=sf.wavresmin[0], high=sf.wavresmax[0]))
+        wavres_single = numpyro.sample("res", dist.Uniform(
+            low=sf.wavresmin[0], high=sf.wavresmax[0]))
         wavres = ones * wavres_single
     else:
-        wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf.wavresmin), high=jnp.array(sf.wavresmax))) # output shape becomes () when the name is "wavres"...????
+        wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf.wavresmin), high=jnp.array(
+            sf.wavresmax)))  # output shape becomes () when the name is "wavres"...????
 
     # linear baseline: quadratic is not much better
     c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
     c1 = numpyro.sample("slope", dist.Uniform(low=-0.1*ones, high=0.1*ones))
-    #rv1 = numpyro.sample("rv1", dist.Uniform(low=sf.rv1bounds[0]*ones, high=sf.rv1bounds[1]*ones))
-    #drv = numpyro.sample("drv", dist.Uniform(low=sf.drvbounds[0]*ones, high=sf.drvbounds[1]*ones))
+    # rv1 = numpyro.sample("rv1", dist.Uniform(low=sf.rv1bounds[0]*ones, high=sf.rv1bounds[1]*ones))
+    # drv = numpyro.sample("drv", dist.Uniform(low=sf.drvbounds[0]*ones, high=sf.drvbounds[1]*ones))
     if rv1bounds is None:
         rv1min, rv1max = sf.rv1bounds
     else:
         rv1min, rv1max = rv1bounds
-    rv1 = numpyro.sample("rv1", dist.Uniform(low=rv1min*ones, high=rv1max*ones))
+    rv1 = numpyro.sample("rv1", dist.Uniform(
+        low=rv1min*ones, high=rv1max*ones))
     if drvbounds is None:
         drvmin, drvmax = sf.drvbounds
     else:
@@ -164,29 +155,33 @@ def model_sb2(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_w
     rv2 = numpyro.deterministic("rv2", rv1 + drv)
 
     fluxmodel = numpyro.deterministic("fluxmodel",
-        self.fluxmodel_multiorder(c0, c1, teff1, teff2, logg1, logg2, feh1, feh2, alpha1, alpha2, vsini1, vsini2, zeta1, zeta2, wavres, rv1, rv2, u1, u2)
-        )
+                                      self.fluxmodel_multiorder(
+                                          c0, c1, teff1, teff2, logg1, logg2, feh1, feh2, alpha1, alpha2, vsini1, vsini2, zeta1, zeta2, wavres, rv1, rv2, u1, u2)
+                                      )
 
     lna = numpyro.sample("lna", dist.Uniform(low=-5, high=0))
     lnc = numpyro.sample("lnc", dist.Uniform(low=lncmin, high=2))
     kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
-    lnsigma = numpyro.sample("lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
+    lnsigma = numpyro.sample(
+        "lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
     diags = self.error_obs**2 + jnp.exp(2*lnsigma)
 
     mask_all = self.mask_obs + (self.mask_fit > 0)
     idx = ~mask_all
     gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
     gp.compute(self.wav_obs[idx].ravel(), diag=diags[idx].ravel())
-    flux_residual = numpyro.deterministic("flux_residual", self.flux_obs[idx].ravel() - fluxmodel[idx].ravel())
+    flux_residual = numpyro.deterministic(
+        "flux_residual", self.flux_obs[idx].ravel() - fluxmodel[idx].ravel())
     numpyro.sample("obs", gp.numpyro_dist(), obs=flux_residual)
 
+
 def cov_rbf(x, tau, alpha, diag):
-    dx = x[:,None] - x[None, :]
+    dx = x[:, None] - x[None, :]
     return alpha**2 * jnp.exp(-0.5 * (dx / tau)**2) + jnp.diag(diag)
 
 
 def model_sb2_numpyrogp(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30., single_wavres=False,
-        teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False):
+                        teff_prior=None, logg_prior=None, feh_prior=None, physical_logg_max=False):
     """ SB2 model
     """
     self = sf.sm
@@ -194,7 +189,8 @@ def model_sb2_numpyrogp(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30.
     teff1 = numpyro.sample("teff1", dist.Uniform(3500, 7000))
     teff2 = numpyro.sample("teff2", dist.Uniform(3500, 7000))
     if physical_logg_max:
-        logg_max1 = -2.34638497e-08*teff1**2 + 1.58069918e-04*teff1 + 4.53251890 # valid for 4500-7000K
+        logg_max1 = -2.34638497e-08*teff1**2 + 1.58069918e-04 * \
+            teff1 + 4.53251890  # valid for 4500-7000K
         logg_max2 = -2.34638497e-08*teff2**2 + 1.58069918e-04*teff2 + 4.53251890
     else:
         logg_max1, logg_max2 = 5., 5.
@@ -220,34 +216,44 @@ def model_sb2_numpyrogp(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30.
 
     ones = jnp.ones(self.Norder)
     if sf.wavresmin[0] == sf.wavresmax[0]:
-        wavres = numpyro.deterministic("res", jnp.array(sf.wavresmin))#[0] * ones)
+        wavres = numpyro.deterministic(
+            "res", jnp.array(sf.wavresmin))  # [0] * ones)
     elif single_wavres:
-        wavres_single = numpyro.sample("res", dist.Uniform(low=sf.wavresmin[0], high=sf.wavresmax[0]))
+        wavres_single = numpyro.sample("res", dist.Uniform(
+            low=sf.wavresmin[0], high=sf.wavresmax[0]))
         wavres = ones * wavres_single
     else:
-        wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf.wavresmin), high=jnp.array(sf.wavresmax))) # output shape becomes () when the name is "wavres"...????
+        wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf.wavresmin), high=jnp.array(
+            sf.wavresmax)))  # output shape becomes () when the name is "wavres"...????
 
     # linear baseline: quadratic is not much better
     c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
     c1 = numpyro.sample("slope", dist.Uniform(low=-0.1*ones, high=0.1*ones))
-    rv1 = numpyro.sample("rv1", dist.Uniform(low=sf.rv1bounds[0]*ones, high=sf.rv1bounds[1]*ones))
-    drv = numpyro.sample("drv", dist.Uniform(low=sf.drvbounds[0]*ones, high=sf.drvbounds[1]*ones))
+    rv1 = numpyro.sample("rv1", dist.Uniform(
+        low=sf.rv1bounds[0]*ones, high=sf.rv1bounds[1]*ones))
+    drv = numpyro.sample("drv", dist.Uniform(
+        low=sf.drvbounds[0]*ones, high=sf.drvbounds[1]*ones))
     rv2 = numpyro.deterministic("rv2", rv1 + drv)
 
     fluxmodel = numpyro.deterministic("fluxmodel",
-        self.fluxmodel_multiorder(c0, c1, teff1, teff2, logg1, logg2, feh1, feh2, alpha1, alpha2, vsini1, vsini2, zeta1, zeta2, wavres, rv1, rv2, u1, u2)
-        )
+                                      self.fluxmodel_multiorder(
+                                          c0, c1, teff1, teff2, logg1, logg2, feh1, feh2, alpha1, alpha2, vsini1, vsini2, zeta1, zeta2, wavres, rv1, rv2, u1, u2)
+                                      )
 
     lna = numpyro.sample("lna", dist.Uniform(-5, 0))
     lntau = numpyro.sample("lntau", dist.Uniform(-5, 2))
-    lnsigma = numpyro.sample("lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
+    lnsigma = numpyro.sample(
+        "lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
     diags = self.error_obs**2 + jnp.exp(2*lnsigma)
 
     mask_all = self.mask_obs + (self.mask_fit > 0)
     idx = ~mask_all
-    cov = cov_rbf(self.wav_obs[idx].ravel(), jnp.exp(lntau), jnp.exp(lna), diags[idx].ravel())
-    flux_residual = numpyro.deterministic("flux_residual", self.flux_obs[idx].ravel() - fluxmodel[idx].ravel())
-    numpyro.sample("obs", dist.MultivariateNormal(loc=0., covariance_matrix=cov), obs=flux_residual)
+    cov = cov_rbf(self.wav_obs[idx].ravel(), jnp.exp(
+        lntau), jnp.exp(lna), diags[idx].ravel())
+    flux_residual = numpyro.deterministic(
+        "flux_residual", self.flux_obs[idx].ravel() - fluxmodel[idx].ravel())
+    numpyro.sample("obs", dist.MultivariateNormal(
+        loc=0., covariance_matrix=cov), obs=flux_residual)
 
 
 def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True, zeta_max=10., teff_min=3500., teff_max=7000.):
@@ -258,8 +264,10 @@ def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True,
     pdict_init = dict(zip(sf.pnames, params_opt_shift))
     if init_order_rv:
         pdict_init['rv'] = jnp.array([np.mean(sf.rvbounds)]*len(sf.ccfrvlist))
-    pdict_init['teff_scaled'] = (pdict_init['teff'] - teff_min) / (teff_max - teff_min)
-    pdict_init['rv_scaled'] = (pdict_init['rv'] - sf.rvbounds[0]) / (sf.rvbounds[1] - sf.rvbounds[0])
+    pdict_init['teff_scaled'] = (
+        pdict_init['teff'] - teff_min) / (teff_max - teff_min)
+    pdict_init['rv_scaled'] = (
+        pdict_init['rv'] - sf.rvbounds[0]) / (sf.rvbounds[1] - sf.rvbounds[0])
     pdict_init['zeta_scaled'] = pdict_init['zeta'] / zeta_max
     pdict_init['vsini_scaled'] = pdict_init['vsini'] / sf.ccfvbroad
     del pdict_init['u1'], pdict_init['u2']
@@ -269,9 +277,9 @@ def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True,
     if drop_keys is not None:
         for k in drop_keys:
             pdict_init.pop(k)
-    print ("# initial parameters for HMC:")
+    print("# initial parameters for HMC:")
     for key in pdict_init.keys():
-        print (key, pdict_init[key])
+        print(key, pdict_init[key])
     init_strategy = init_to_value(values=pdict_init)
     return init_strategy
 
@@ -296,23 +304,25 @@ def get_mean_models(samples, sf, keytag=''):
 
 def get_mean_models(samples, sf):
     ms = np.mean(samples['fluxmodel'], axis=0)
-    lna, lnc, lnsigma = np.mean(samples['lna']), np.mean(samples['lnc']), np.mean(samples['lnsigma'])
-    
+    lna, lnc, lnsigma = np.mean(samples['lna']), np.mean(
+        samples['lnc']), np.mean(samples['lnsigma'])
+
     sm = sf.sm
-    idx = ~(sm.mask_obs+sm.mask_fit>0)
+    idx = ~(sm.mask_obs+sm.mask_fit > 0)
     kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
     diags = sm.error_obs**2 + jnp.exp(2*lnsigma)
 
     mgps = []
     for j in range(len(idx)):
         idxj = idx[j]
-        res = np.mean(samples['flux_residual%d'%j], axis=0)
+        res = np.mean(samples['flux_residual%d' % j], axis=0)
         if not sm.gpu:
             gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
             gp.compute(sm.wav_obs[j][idxj], diag=diags[j][idxj])
             mgp = gp.predict(res, t=sm.wav_obs[j])
         else:
-            gp = tinygp.GaussianProcess(kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
+            gp = tinygp.GaussianProcess(
+                kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
             mgp = gp.predict(res, X_test=sm.wav_obs[j])
         mgps.append(mgp)
 
@@ -342,27 +352,33 @@ def model_pair(sf1, sf2, empirical_vmacro=False, lnsigma_max=-3, single_wavres=F
 
     ones = jnp.ones(self1.Norder)
     if single_wavres:
-        wavres_single = numpyro.sample("res", dist.Uniform(low=sf1.wavresmin[0], high=sf1.wavresmax[0]))
+        wavres_single = numpyro.sample("res", dist.Uniform(
+            low=sf1.wavresmin[0], high=sf1.wavresmax[0]))
         wavres = ones * wavres_single
     else:
-        wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf1.wavresmin), high=jnp.array(sf1.wavresmax))) # output shape becomes () when the name is "wavres"...????
+        wavres = numpyro.sample("res", dist.Uniform(low=jnp.array(sf1.wavresmin), high=jnp.array(
+            sf1.wavresmax)))  # output shape becomes () when the name is "wavres"...????
     c0 = numpyro.sample("norm", dist.Uniform(low=0.8*ones, high=1.2*ones))
     c1 = numpyro.sample("slope", dist.Uniform(low=-0.1*ones, high=0.1*ones))
-    rv1 = numpyro.sample("rv", dist.Uniform(low=sf1.rvbounds[0]*ones, high=sf1.rvbounds[1]*ones))
+    rv1 = numpyro.sample("rv", dist.Uniform(
+        low=sf1.rvbounds[0]*ones, high=sf1.rvbounds[1]*ones))
     drv = numpyro.sample("drv", dist.Uniform(low=-10, high=10))
     rv2 = numpyro.deterministic("rv2", rv1 + drv * ones)
 
     fluxmodel1 = numpyro.deterministic("fluxmodel1",
-        fluxmodel_orders(self1, self1.wav_obs, c0, c1, teff, logg, feh, alpha, vsini1, zeta, wavres, rv1, u1, u2)
-        )
+                                       fluxmodel_orders(
+                                           self1, self1.wav_obs, c0, c1, teff, logg, feh, alpha, vsini1, zeta, wavres, rv1, u1, u2)
+                                       )
     fluxmodel2 = numpyro.deterministic("fluxmodel2",
-        fluxmodel_orders(self2, self2.wav_obs, c0, c1, teff, logg, feh, alpha, vsini2, zeta, wavres, rv2, u1, u2)
-        )
+                                       fluxmodel_orders(
+                                           self2, self2.wav_obs, c0, c1, teff, logg, feh, alpha, vsini2, zeta, wavres, rv2, u1, u2)
+                                       )
 
     lna = numpyro.sample("lna", dist.Uniform(low=-5, high=0))
     lnc = numpyro.sample("lnc", dist.Uniform(low=-5, high=2))
     kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
-    lnsigma = numpyro.sample("lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
+    lnsigma = numpyro.sample(
+        "lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
 
     diags1 = self1.error_obs**2 + jnp.exp(2*lnsigma)
     diags2 = self2.error_obs**2 + jnp.exp(2*lnsigma)

@@ -1,5 +1,6 @@
 
-__all__ = ["get_parameter_bounds", "optim_svi", "get_mean_models", "scale_pdic"]
+__all__ = ["get_parameter_bounds", "optim_svi",
+           "get_mean_models", "scale_pdic"]
 
 import numpy as np
 import jax.numpy as jnp
@@ -9,12 +10,22 @@ from jax import random
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoLaplaceApproximation
 from numpyro.infer.initialization import init_to_value, init_to_sample
-import celerite2, tinygp
+import celerite2
+import tinygp
 from celerite2.jax import terms as jax_terms
 
 
 def get_parameter_bounds(sf, slope_max=0.2, zeta_max=10., model='coelho'):
+    """parameter bounds for optimization
+
+        Args:
+            sf: SpecFig class
+            slope_max: maximum value of |slope|
+            zeta_max:
+
+    """
     ones = jnp.ones(sf.sm.Norder)
+    sgrid = sf.sm.sg
 
     vsini_max = sf.ccfvbroad
     rvmean = sigma_clipped_stats(sf.ccfrvlist)[0]
@@ -24,9 +35,9 @@ def get_parameter_bounds(sf, slope_max=0.2, zeta_max=10., model='coelho'):
         rvmin, rvmax = rvmean - 0.5 * vsini_max, rvmean + 0.5 * vsini_max
 
     param_bounds = {
-        "teff": [3500., 7000.],
-        "logg": [3., 5.],
-        "feh": [-1, 0.5],
+        "teff": [sgrid.t0[0], sgrid.t1[0]],
+        "logg": [sgrid.g0[0], sgrid.g1[0]],
+        "alpha": [sgrid.a0[0], sgrid.a1[0]],
         "vsini": [0, vsini_max],
         "zeta": [0, zeta_max],
         "q1": [0, 1],
@@ -38,11 +49,11 @@ def get_parameter_bounds(sf, slope_max=0.2, zeta_max=10., model='coelho'):
     }
 
     if model == 'bosz':
-        param_bounds["alpha"] = [-0.25, 0.25]
-        param_bounds["carbon"] = [-0.25, 0.25]
-        param_bounds['vmic'] = [0., 4.]
+        param_bounds["mh"] = [sgrid.m0[0], sgrid.m1[0]]
+        param_bounds["carbon"] = [sgrid.c0[0], sgrid.c1[0]],
+        param_bounds['vmic'] = [sgrid.v0[0], sgrid.v1[0]],
     else:
-        param_bounds["alpha"] = [0, 0.4]
+        param_bounds["feh"] = [sgrid.f0[0], sgrid.f1[0]]
 
     return param_bounds
 
@@ -61,11 +72,13 @@ def optim_svi(numpyro_model, step_size, num_steps, p_initial=None, **kwargs):
 
     """
     optimizer = numpyro.optim.Adam(step_size=step_size)
-    
+
     if p_initial is None:
-        guide = AutoLaplaceApproximation(numpyro_model, init_loc_fn=init_to_sample)
+        guide = AutoLaplaceApproximation(
+            numpyro_model, init_loc_fn=init_to_sample)
     else:
-        guide = AutoLaplaceApproximation(numpyro_model, init_loc_fn=init_to_value(values=p_initial))
+        guide = AutoLaplaceApproximation(
+            numpyro_model, init_loc_fn=init_to_value(values=p_initial))
 
     # SVI object
     svi = SVI(numpyro_model, guide, optimizer, loss=Trace_ELBO(), **kwargs)
@@ -79,24 +92,37 @@ def optim_svi(numpyro_model, step_size, num_steps, p_initial=None, **kwargs):
 
 
 def get_mean_models(samples, sf):
+    """compute GP predictions
+
+        Args:
+            samples: posterior samples
+            sf: SpecFit class
+
+        Returns:
+            list of mean models (Norder, Npix)
+            list of mean models + mean prediction (Norder, Npix)
+
+    """
     ms = np.mean(samples['fluxmodel'], axis=0)
-    lna, lnc, lnsigma = np.mean(samples['lna']), np.mean(samples['lnc']), np.mean(samples['lnsigma'])
-    
+    lna, lnc, lnsigma = np.mean(samples['lna']), np.mean(
+        samples['lnc']), np.mean(samples['lnsigma'])
+
     sm = sf.sm
-    idx = ~(sm.mask_obs+sm.mask_fit>0)
+    idx = ~(sm.mask_obs+sm.mask_fit > 0)
     kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
     diags = sm.error_obs**2 + jnp.exp(2*lnsigma)
 
     mgps = []
     for j in range(len(idx)):
         idxj = idx[j]
-        res = np.mean(samples['flux_residual%d'%j], axis=0)
+        res = np.mean(samples['flux_residual%d' % j], axis=0)
         if not sm.gpu:
             gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
             gp.compute(sm.wav_obs[j][idxj], diag=diags[j][idxj])
             mgp = gp.predict(res, t=sm.wav_obs[j])
         else:
-            gp = tinygp.GaussianProcess(kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
+            gp = tinygp.GaussianProcess(
+                kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
             mgp = gp.predict(res, X_test=sm.wav_obs[j])
         mgps.append(mgp)
 
@@ -105,14 +131,14 @@ def get_mean_models(samples, sf):
 
 def scale_pdic(pdic, param_bounds):
     """scale parameters using bounds
-    
+
         Args:
             pdic: dict of physical parameters
             param_bounds: dictionary of (lower bound array, upper bound array)
 
         Returns:
             dict of scaled parameters
-    
+
     """
     pdic_scaled = {}
     for key, (pmin, pmax) in param_bounds.items():
@@ -120,6 +146,7 @@ def scale_pdic(pdic, param_bounds):
             continue
         pdic_scaled[key+"_scaled"] = (pdic[key] - pmin) / (pmax - pmin)
     return pdic_scaled
+
 
 '''
 def unscale_pdic(pdic_scaled, param_bounds):

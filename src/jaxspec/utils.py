@@ -1,4 +1,5 @@
-__all__ = ["get_beta", "varr_for_kernels", "doppler_shift", "broaden_and_shift", "broaden_and_shift_vmap", "broaden_and_shift_vmap_full", "compute_ccf", "c_in_kms"]
+__all__ = ["get_beta", "varr_for_kernels", "doppler_shift", "broaden_and_shift",
+           "broaden_and_shift_vmap", "broaden_and_shift_vmap_full", "compute_ccf", "c_in_kms"]
 
 import numpy as np
 import jax.numpy as jnp
@@ -6,9 +7,11 @@ from jax import (jit, vmap)
 from .kernels import rotmacrokernel
 from scipy.interpolate import interp1d
 from scipy.signal import correlate
-import psutil, gc
+import psutil
+import gc
 
 c_in_kms = 2.99792458e5
+
 
 def get_beta(resolution):
     """ gaussian width (km/s) of the instrumental profile
@@ -35,9 +38,8 @@ def varr_for_kernels(dlogwav, vmax=50):
 
     """
     v_pix = dlogwav * c_in_kms
-    #pix_max = int(vmax / v_pix)
-    pix_max = int(np.round(vmax / v_pix)) # make sure that pix_max is exactly the same for all orders
-    #pixs = np.arange(-pix_max, pix_max*1.01, 1)
+    # make sure that pix_max is exactly the same for all orders
+    pix_max = int(np.round(vmax / v_pix))
     pixs = np.arange(-pix_max, pix_max+0.1, 1)
     varr = pixs * v_pix
     return varr
@@ -82,11 +84,14 @@ def broaden_and_shift(wavout, wav, flux, vsini, zeta, beta, rv, varr, u1=0.5, u2
     bflux = jnp.convolve(flux, kernel, 'same')
     return doppler_shift(wavout, wav, bflux, rv)
 
+
 # mappable along the 1st axis (wavout, wav, flux, varr)
-broaden_and_shift_vmap = vmap(broaden_and_shift, (0,0,0,None,None,None,None,0,None,None), 0)
+broaden_and_shift_vmap = vmap(
+    broaden_and_shift, (0, 0, 0, None, None, None, None, 0, None, None), 0)
 
 # mappable along the 1st axis (wavout, wav, flux, beta, rv, varr)
-broaden_and_shift_vmap_full = vmap(broaden_and_shift, (0,0,0,None,None,0,0,0,None,None), 0)
+broaden_and_shift_vmap_full = vmap(
+    broaden_and_shift, (0, 0, 0, None, None, 0, 0, 0, None, None), 0)
 
 
 def compute_ccf(x, y, xmodel, ymodel, mask=None, oversample_factor=5):
@@ -111,15 +116,17 @@ def compute_ccf(x, y, xmodel, ymodel, mask=None, oversample_factor=5):
     yy[mask] = np.nan
 
     ndata = len(x)
-    xgrid = np.logspace(np.log10(x.min())+1e-4, np.log10(x.max())-1e-4, ndata*oversample_factor)
-    ygrid = interp1d(x, yy)(xgrid) - np.nanmean(yy)#1.
+    xgrid = np.logspace(np.log10(x.min())+1e-4,
+                        np.log10(x.max())-1e-4, ndata*oversample_factor)
+    ygrid = interp1d(x, yy)(xgrid) - np.nanmean(yy)  # 1.
     ymgrid = interp1d(xmodel, ymodel)(xgrid) - np.nanmean(ymodel)
-    ygrid[ygrid!=ygrid] = 0
+    ygrid[ygrid != ygrid] = 0
 
     ccf = correlate(ygrid, ymgrid)
     logxgrid = np.log(xgrid)
     dlogx = np.diff(logxgrid)[0]
-    velgrid = (np.arange(len(ccf))*dlogx - (logxgrid[-1]-logxgrid[0])) * c_in_kms
+    velgrid = (np.arange(len(ccf))*dlogx -
+               (logxgrid[-1]-logxgrid[0])) * c_in_kms
 
     return velgrid, ccf
 
