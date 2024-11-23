@@ -1,6 +1,6 @@
 
 __all__ = ["get_parameter_bounds", "optim_svi",
-           "get_mean_models", "scale_pdic"]
+           "get_mean_models", "scale_pdic", "scale_pdic_sb2"]
 
 import numpy as np
 import jax.numpy as jnp
@@ -50,10 +50,19 @@ def get_parameter_bounds(sf, slope_max=0.2, zeta_max=10., model='coelho'):
 
     if model == 'bosz':
         param_bounds["mh"] = [sgrid.m0[0], sgrid.m1[0]]
-        param_bounds["carbon"] = [sgrid.c0[0], sgrid.c1[0]],
-        param_bounds['vmic'] = [sgrid.v0[0], sgrid.v1[0]],
+        param_bounds["carbon"] = [sgrid.c0[0], sgrid.c1[0]]
+        param_bounds['vmic'] = [sgrid.v0[0], sgrid.v1[0]]
     else:
         param_bounds["feh"] = [sgrid.f0[0], sgrid.f1[0]]
+
+    if hasattr(sf, 'v1'):
+        rv1min, rv1max = sf.v1 - 0.5 * vsini_max, sf.v1 + 0.5 * vsini_max
+        dv = max(sf.v2 - sf.v1, 1e-6)
+        dvmin, dvmax = max(0., dv - 0.5*vsini_max), dv + 0.5 * \
+            vsini_max  # v2 > v1, i.e., dv > 0
+        param_bounds['rv1'] = [rv1min*ones, rv1max*ones]
+        param_bounds['drv'] = [dvmin*ones, dvmax*ones]
+        del param_bounds['rv']
 
     return param_bounds
 
@@ -146,6 +155,34 @@ def scale_pdic(pdic, param_bounds, keys_to_keep=[]):
         if np.allclose(pmin, pmax):
             continue
         pdic_scaled[key+"_scaled"] = (pdic[key] - pmin) / (pmax - pmin)
+    for key in keys_to_keep:
+        pdic_scaled[key] = pdic[key]
+    return pdic_scaled
+
+
+def scale_pdic_sb2(pdic, param_bounds, keys_to_keep=[]):
+    """scale parameters using bounds for SB2
+
+        Args:
+            pdic: dict of physical parameters
+            param_bounds: dictionary of (lower bound array, upper bound array)
+            keys_to_keep: keys for the items that are kept to be unscaled
+
+        Returns:
+            dict of scaled parameters
+
+    """
+    pdic_scaled = {}
+    for key, (pmin, pmax) in param_bounds.items():
+        if np.allclose(pmin, pmax):
+            continue
+        if key in ['norm', 'slope', 'rv1', 'drv']:
+            pdic_scaled[key+"_scaled"] = (pdic[key] - pmin) / (pmax - pmin)
+        else:
+            pdic_scaled[key +
+                        "1_scaled"] = (pdic[key+"1"] - pmin) / (pmax - pmin)
+            pdic_scaled[key +
+                        "2_scaled"] = (pdic[key+"2"] - pmin) / (pmax - pmin)
     for key in keys_to_keep:
         pdic_scaled[key] = pdic[key]
     return pdic_scaled

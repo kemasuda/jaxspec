@@ -3,7 +3,6 @@ from scipy.signal import medfilt
 import jaxopt
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-from astropy.stats import sigma_clipped_stats
 from .specmodel import SpecModel, SpecModel2
 from .specgrid import SpecGrid, SpecGridBosz
 from .utils import *
@@ -266,14 +265,18 @@ class SpecFit:
                             (tag, order), dpi=200, bbox_inches="tight")
                 plt.close()
 
-    def mask_outliers(self, p_fit, sigma_threshold=5., plot=False, extend_outlier_mask=True):
+    def mask_outliers(self, p_fit, sigma_threshold=3., output_dir=None, extend_outlier_mask=True):
         for i in range(self.sm.Norder):
             x, y, err = self.sm.wav_obs[i], self.sm.flux_obs[i], self.sm.error_obs[i]
             clip = self.sm.mask_obs[i]
             yres_phys = y - p_fit['fluxmodel'][i]
             # for median filtering
+            if 'vsini' in p_fit.keys():
+                vsini = p_fit['vsini']
+            else:
+                vsini = max(p_fit['vsini1'], p_fit['vsini2'])
             npix_vsini = int(
-                np.median(x) * p_fit['vsini'] * 2 / 3e5 / np.median(np.diff(x))) * 4 + 1
+                np.median(x) * vsini * 2 / 3e5 / np.median(np.diff(x))) * 4 + 1
             yres_phys_smoothed = medfilt(yres_phys, kernel_size=npix_vsini)
             yres_res = (yres_phys - yres_phys_smoothed) / err
             sigma_cut = 1.4826 * mad(yres_res[~clip])
@@ -284,9 +287,6 @@ class SpecFit:
             if extend_outlier_mask:
                 flag_outlier = extend_mask(flag_outlier) > 0
             self.sm.mask_fit[i] = np.array(flag_outlier).astype(float)
-
-            if not plot:
-                continue
 
             fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
             ax1.plot(x[~clip], y[~clip], 'o', color='gray',
@@ -314,6 +314,11 @@ class SpecFit:
 
             ax3.set_xlim(x[0], x[-1])
             fig.tight_layout(pad=0.2)
+
+            if output_dir is not None:
+                plt.savefig(output_dir+"outlier_order%02d.png" %
+                            self.orders[i], dpi=200, bbox_inches="tight")
+                plt.close()
 
         return None
 
@@ -392,7 +397,12 @@ class SpecFit2(SpecFit):
     def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., output_dir=None, ccfvmax=100., tag=''):
         vgrids, ccfs, ccffuncs = [], [], []
         sm = self.sm
-        wmodels, fmodels = sm.wavgrid, sm.sgvalues(teff, logg, feh, alpha)
+        if sm.sg.model == 'bosz':
+            wmodels, fmodels = sm.wavgrid, sm.sg.values(
+                teff, logg, feh, alpha, 0., 1., sm.wavgrid)
+        else:
+            wmodels, fmodels = sm.wavgrid, sm.sg.values(
+                teff, logg, feh, alpha, sm.wavgrid)
         for wobs, fobs, eobs, mobs, mfit, order, wmodel, fmodel in zip(sm.wav_obs, sm.flux_obs, sm.error_obs, sm.mask_obs, sm.mask_fit, self.orders, wmodels, fmodels):
             print("# order %d" % order)
             mask = mobs + (mfit > 0.)
@@ -465,49 +475,3 @@ class SpecFit2(SpecFit):
         self.ccfvbroad = vbroad
 
         return rvgrid, medccf
-
-    def optim(self, solver=None, vsinimin=0., zetamin=0., zetamax=10., lnsigmamax=-5, method='TNC', set_init_params=None, slopemax=0.2, fratiomin=0.5, fratiomax=1.5):
-        vsinimax = self.ccfvbroad
-        rvmin1, rvmax1 = self.v1 - 0.5*vsinimax, self.v1 + 0.5*vsinimax
-        dv = self.v2 - self.v1
-        if dv == 0:
-            dv = 1e-6
-        # dvmin, dvmax = dv * 0., dv * 2
-        # dvmin, dvmax = dv - 0.5*vsinimax, dv + 0.5*vsinimax
-        dvmin, dvmax = max(0., dv-0.5*vsinimax), dv + 0.5 * \
-            vsinimax  # v2 > v1, i.e., dv > 0
-        zetamin, zetamax = 0, 10.
-        resmin, resmax = np.mean(self.wavresmin), np.mean(self.wavresmax)
-
-        pnames = ['c0', 'c1', 'teff1', 'logg1', 'feh1', 'alpha1', 'vsini1', 'zeta1',
-                  'teff2', 'logg2', 'feh2', 'alpha2', 'vsini2', 'zeta2',
-                  'wavres', 'rv', 'drv', 'u1', 'u2', 'f2_f1', 'lna', 'lnc', 'lnsigma']
-        if set_init_params is None:
-            init_params = jnp.array([1, 0]+[6000, 4., -0.2, 0.1, 0.5*vsinimax, 0.5*zetamax]+[6000, 4., -0.2,
-                                    0.1, 0.5*vsinimax, 0.5*zetamax]+[0.5*(resmin+resmax), self.v1, dv, 0, 0, 1.]+[-3., 0., -8])
-        else:
-            init_params = set_init_params
-        params_lower = jnp.array([0.8, -slopemax]+[3500., 3., -1., 0., vsinimin, zetamin]+[
-                                 3500., 3., -1., 0., vsinimin, zetamin]+[resmin, rvmin1, dvmin, 0, 0, fratiomin]+[-5, -5, -10.])
-        params_upper = jnp.array([1.2, slopemax]+[7000, 5., 0.5, 0.4, vsinimax, zetamax]+[
-                                 7000, 5., 0.5, 0.4, vsinimax, zetamax]+[resmax, rvmax1, dvmax, 0, 0, fratiomax]+[0, 1, lnsigmamax])
-        bounds = (params_lower, params_upper)
-        self.rv1bounds = (rvmin1, rvmax1)
-        self.drvbounds = (dvmin, dvmax)
-        self.pnames = pnames
-        self.bounds = bounds
-
-        def objective(p): return -self.sm.gp_loglikelihood(p)
-
-        print("# initial objective function:", objective(init_params))
-        if solver is None:
-            solver = jaxopt.ScipyBoundedMinimize(fun=objective, method=method)
-        res = solver.run(init_params, bounds=bounds)
-
-        params, state = res
-        print(state)
-        for n, v in zip(pnames, params):
-            print("%s\t%f" % (n, v))
-
-        self.params_opt = params
-        return params
