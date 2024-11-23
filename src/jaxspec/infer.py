@@ -129,12 +129,13 @@ def get_mean_models(samples, sf):
     return ms, np.array(mgps) + ms
 
 
-def scale_pdic(pdic, param_bounds):
+def scale_pdic(pdic, param_bounds, keys_to_keep=[]):
     """scale parameters using bounds
 
         Args:
             pdic: dict of physical parameters
             param_bounds: dictionary of (lower bound array, upper bound array)
+            keys_to_keep: keys for the items that are kept to be unscaled
 
         Returns:
             dict of scaled parameters
@@ -145,6 +146,8 @@ def scale_pdic(pdic, param_bounds):
         if np.allclose(pmin, pmax):
             continue
         pdic_scaled[key+"_scaled"] = (pdic[key] - pmin) / (pmax - pmin)
+    for key in keys_to_keep:
+        pdic_scaled[key] = pdic[key]
     return pdic_scaled
 
 
