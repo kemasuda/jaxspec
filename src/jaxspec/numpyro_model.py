@@ -1,5 +1,4 @@
-__all__ = ["model_single", "model_sb2", "initialize_HMC",
-           "get_mean_models", "model_sb2_numpyrogp"]
+__all__ = ["model_single", "model_sb2", "get_mean_models"]
 
 import jax.numpy as jnp
 import numpy as np
@@ -256,60 +255,29 @@ def model_sb2_numpyrogp(sf, empirical_vmacro=False, lnsigma_max=-3, vsinimax=30.
         loc=0., covariance_matrix=cov), obs=flux_residual)
 
 
-def initialize_HMC(sf, keys=None, vals=None, drop_keys=None, init_order_rv=True, zeta_max=10., teff_min=3500., teff_max=7000.):
-    """ initialize HMC
-    """
-    params_center = 0.5*(sf.bounds[0]+sf.bounds[1])
-    params_opt_shift = 0.99*sf.params_opt + 0.01*params_center
-    pdict_init = dict(zip(sf.pnames, params_opt_shift))
-    if init_order_rv:
-        pdict_init['rv'] = jnp.array([np.mean(sf.rvbounds)]*len(sf.ccfrvlist))
-    pdict_init['teff_scaled'] = (
-        pdict_init['teff'] - teff_min) / (teff_max - teff_min)
-    pdict_init['rv_scaled'] = (
-        pdict_init['rv'] - sf.rvbounds[0]) / (sf.rvbounds[1] - sf.rvbounds[0])
-    pdict_init['zeta_scaled'] = pdict_init['zeta'] / zeta_max
-    pdict_init['vsini_scaled'] = pdict_init['vsini'] / sf.ccfvbroad
-    del pdict_init['u1'], pdict_init['u2']
-    if keys is not None:
-        for k, v in zip(keys, vals):
-            pdict_init[k] = v
-    if drop_keys is not None:
-        for k in drop_keys:
-            pdict_init.pop(k)
-    print("# initial parameters for HMC:")
-    for key in pdict_init.keys():
-        print(key, pdict_init[key])
-    init_strategy = init_to_value(values=pdict_init)
-    return init_strategy
-
-
-"""
-def get_mean_models(samples, sf, keytag=''):
-    ms = np.mean(samples['fluxmodel'+keytag], axis=0)
-    mres = np.mean(samples['flux_residual'+keytag], axis=0)
-    lna, lnc, lnsigma = np.mean(samples['lna']), np.mean(samples['lnc']), np.mean(samples['lnsigma'])
-
-    sm = sf.sm
-    idx = ~(sm.mask_obs+sm.mask_fit>0)
-    kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
-    diags = sm.error_obs**2 + jnp.exp(2*lnsigma)
-    gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
-    gp.compute(sm.wav_obs[idx].ravel(), diag=diags[idx].ravel())
-    mgps = np.array([gp.predict(mres.ravel(), t=wobs) for wobs in sm.wav_obs]) + ms
-
-    return ms, mgps
-"""
-
-
 def get_mean_models(samples, sf):
+    """compute mean GP predictions for posterior samples
+
+        Args:
+            samples: posterior samples from numpyro MCMC
+            sf: SpecFit class
+
+        Returns:
+            mean of physical flux models
+            GP prediction
+
+    """
     ms = np.mean(samples['fluxmodel'], axis=0)
     lna, lnc, lnsigma = np.mean(samples['lna']), np.mean(
         samples['lnc']), np.mean(samples['lnsigma'])
 
     sm = sf.sm
-    idx = ~(sm.mask_obs+sm.mask_fit > 0)
-    kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+    idx = ~(sm.mask_obs + sm.mask_fit > 0)
+    if not sm.gpu:
+        kernel = jax_terms.Matern32Term(
+            sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+    else:
+        kernel = jnp.exp(2*lna) * tinygp.kernels.Matern32(jnp.exp(lnc))
     diags = sm.error_obs**2 + jnp.exp(2*lnsigma)
 
     mgps = []
