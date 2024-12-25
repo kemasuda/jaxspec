@@ -54,15 +54,18 @@ class SpecModel:
                 flux model (Norder, Npix) at wav_obs
 
         """
-        c0, c1, teff, logg, alpha, vsini, zeta, res, rv, u1, u2, dilution \
-            = par["norm"], par["slope"], par["teff"], par["logg"], par["alpha"], par["vsini"], par["zeta"], par['wavres'], par["rv"], par['u1'], par['u2'], par['dilution']
+        c0, c1, teff, logg, vsini, zeta, res, rv, u1, u2, dilution \
+            = par["norm"], par["slope"], par["teff"], par["logg"], par["vsini"], par["zeta"], par['wavres'], par["rv"], par['u1'], par['u2'], par['dilution']
         wav_out = self.wav_obs
         if self.sg.model == 'bosz':
             flux_raw = self.sg.values(
-                teff, logg, par['mh'], alpha, par['carbon'], par['vmic'], self.wavgrid)
+                teff, logg, par['mh'], par["alpha"], par['carbon'], par['vmic'], self.wavgrid)
+        elif self.sg.model == 'tlusty':
+            flux_raw = self.sg.values(
+                teff, logg, par['logZ'], self.wavgrid)
         else:
             flux_raw = self.sg.values(
-                teff, logg, par["feh"], alpha, self.wavgrid)
+                teff, logg, par["feh"], par["alpha"], self.wavgrid)
         flux_base = c0[:, jnp.newaxis] + c1[:, jnp.newaxis] * (wav_out - jnp.mean(
             self.wav_obs, axis=1)[:, jnp.newaxis]) / self.wav_obs_range[:, jnp.newaxis]
         flux_phys = flux_base * ((1 - dilution) * broaden_and_shift_vmap_full(

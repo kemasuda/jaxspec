@@ -4,7 +4,7 @@ import jaxopt
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from .specmodel import SpecModel, SpecModel2
-from .specgrid import SpecGrid, SpecGridBosz
+from .specgrid import SpecGrid, SpecGridBosz, SpecGridTlusty
 from .utils import *
 __all__ = ["SpecFit", "SpecFit2"]
 
@@ -17,7 +17,7 @@ from jax import config
 config.update('jax_enable_x64', True)
 
 
-def get_grid_wavranges_and_paths(gridpath):
+def get_grid_wavranges_and_paths(gridpath, gridtag):
     """get wavelength ranges and paths for grid files in the path
 
         Args:
@@ -31,7 +31,7 @@ def get_grid_wavranges_and_paths(gridpath):
     if gridpath[-1] != "/":
         gridpath += "/"
     wavranges_grid, paths = [], []
-    for gridfile in glob.glob(gridpath+"*.npz"):
+    for gridfile in glob.glob(gridpath+"*%s.npz" % gridtag):
         try:
             pattern = ".*/(\d+-\d+).*"
             result = re.match(pattern, gridfile)
@@ -49,7 +49,7 @@ def get_grid_wavranges_and_paths(gridpath):
 class SpecFit:
     """class for spectrum fitting"""
 
-    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., gpu=False, model='coelho', wavres_default=70000.):
+    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., gpu=False, model='coelho', wavres_default=70000., gridtag=''):
         """initialization
 
             Args:
@@ -66,7 +66,7 @@ class SpecFit:
         wav_obs, flux_obs, error_obs, mask_obs = data
         assert np.shape(wav_obs)[0] == len(orders)
 
-        wavranges, paths = get_grid_wavranges_and_paths(gridpath)
+        wavranges, paths = get_grid_wavranges_and_paths(gridpath, gridtag)
         paths_order = []
         for i, wobs in enumerate(wav_obs):
             wobsmin, wobsmax = wobs.min(), wobs.max()
@@ -83,6 +83,8 @@ class SpecFit:
 
         if model == 'bosz':
             _sg = SpecGridBosz(paths_order)
+        elif model == 'tlusty':
+            _sg = SpecGridTlusty(paths_order)
         else:
             _sg = SpecGrid(paths_order)
         self.sm = SpecModel(_sg, wav_obs, flux_obs,
@@ -111,7 +113,7 @@ class SpecFit:
         self.wavresmin = np.array(res_min).astype(float)
         self.wavresmax = np.array(res_max).astype(float)
 
-    def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., ccfvmax=100., output_dir=None, tag=''):
+    def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., v_limit=500, ccfvmax=100., output_dir=None, tag=''):
         """compute CCF with a theoretical template
 
             Args:
@@ -130,6 +132,9 @@ class SpecFit:
         if sm.sg.model == 'bosz':
             wmodels, fmodels = sm.wavgrid, sm.sg.values(
                 teff, logg, feh, alpha, 0., 1., sm.wavgrid)
+        elif sm.sg.model == 'tlusty':
+            wmodels, fmodels = sm.wavgrid, sm.sg.values(
+                teff, logg, feh, sm.wavgrid)
         else:
             wmodels, fmodels = sm.wavgrid, sm.sg.values(
                 teff, logg, feh, alpha, sm.wavgrid)
@@ -141,7 +146,7 @@ class SpecFit:
             ccfs.append(ccf)
             ccffuncs.append(interp1d(vgrid, ccf))
 
-        ccfrvs = np.array([vg[np.argmax(ccf)]
+        ccfrvs = np.array([vg[np.argmax(np.where(np.abs(vg) < v_limit, ccf, 0))]
                           for vg, ccf in zip(vgrids, ccfs)])
         ccfrv = np.median(ccfrvs)
         rvgrid = np.linspace(ccfrv-ccfvmax, ccfrv+ccfvmax, 10000)

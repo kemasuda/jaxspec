@@ -11,7 +11,7 @@ from celerite2.jax import terms as jax_terms
 from .utils import *
 
 
-def model_single(sf, param_bounds, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False, physical_logg_max=False, save_pred=False):
+def model_single(sf, param_bounds, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, lnc_max=2., fit_dilution=False, physical_logg_max=False, save_pred=False):
     """model for a single star
 
         Args:
