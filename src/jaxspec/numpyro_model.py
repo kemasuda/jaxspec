@@ -11,7 +11,7 @@ from celerite2.jax import terms as jax_terms
 from .utils import *
 
 
-def empirical_vmic(teff, logg, feh):
+def get_empirical_vmic(teff, logg, feh):
     """for logg>3.5, teff>5000"""
     t0 = 5500
     g0 = 4.0
@@ -63,7 +63,8 @@ def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, e
             "zeta", dist.TruncatedNormal(loc=zeta_emp, scale=zeta_emp_scale, low=0.))
 
     if empirical_vmic and _sm.sg.model == 'bosz':
-        par["vmic"] = empirical_vmic(par["teff"], par["logg"], par["mh"])
+        par["vmic"] = numpyro.deterministic(
+            "vmic", get_empirical_vmic(par["teff"], par["logg"], par["mh"]))
 
     par['u1'] = numpyro.deterministic("u1", 2*jnp.sqrt(par["q1"])*par["q2"])
     par['u2'] = numpyro.deterministic("u2", jnp.sqrt(par["q1"])-par["u1"])
