@@ -11,7 +11,16 @@ from celerite2.jax import terms as jax_terms
 from .utils import *
 
 
-def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False, physical_logg_max=False, save_pred=False):
+def empirical_vmic(teff, logg, feh):
+    """for logg>3.5, teff>5000"""
+    t0 = 5500
+    g0 = 4.0
+    vmic = 1.05 + 2.51e-4*(teff-t0) + 1.5e-7*(teff-t0)**2 - 0.14 * \
+        (logg-g0) - 0.05e-1*(logg-g0)**2 + 0.05*feh + 0.01*feh**2
+    return vmic
+
+
+def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, empirical_vmic=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False, physical_logg_max=False, save_pred=False):
     """model for a single star
 
         Args:
@@ -32,6 +41,8 @@ def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, l
             continue
         if key == 'zeta' and empirical_vmacro:
             continue
+        if key == 'vmic' and empirical_vmic:
+            continue
         if key == 'wavres':
             continue
         par[key+"_scaled"] = numpyro.sample(key+"_scaled", dist.Uniform(
@@ -50,6 +61,9 @@ def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, l
         zeta_emp = 3.98 + (par["teff"] - 5770.) / 650.
         par["zeta"] = numpyro.sample(
             "zeta", dist.TruncatedNormal(loc=zeta_emp, scale=zeta_emp_scale, low=0.))
+
+    if empirical_vmic and _sm.sg.model == 'bosz':
+        par["vmic"] = empirical_vmic(par["teff"], par["logg"], par["mh"])
 
     par['u1'] = numpyro.deterministic("u1", 2*jnp.sqrt(par["q1"])*par["q2"])
     par['u2'] = numpyro.deterministic("u2", jnp.sqrt(par["q1"])-par["u1"])
