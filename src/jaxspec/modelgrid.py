@@ -336,20 +336,30 @@ def compute_grid_tlusty(wminaa, wmaxaa, data_dir, output_dir, print_info=False, 
     df_all = []
     teff, logg, logZ, vmic = [], [], [], []
 
-    for dirname in data_dir.glob("Z*"):
+    dirnames = list(data_dir.glob("Z*_vt2"))+list(data_dir.glob("Z*_ostar"))
+
+    for dirname in dirnames:
         print(dirname)
-        _Z, _vmic = float(str(dirname).split(
-            "/")[-1].split("_")[0][1:]), float(str(dirname).split("/")[-1].split("_")[1][2:])
-        if _vmic > 2:
-            continue
+        _Z = float(str(dirname).split("/")[-1].split("_")[0][1:])
+        oflag = True if 'ostar' in str(dirname) else False
         _logZ = np.log10(_Z)
         files_cont = list(dirname.glob("*.17.gz"))
         files_spec = list(dirname.glob("*.7.gz"))
         for fname_cont, fname_spec in zip(files_cont, files_spec):
             namestr = str(fname_cont).split("/")[-1]
-            print(namestr)
-            _teff, _logg = float(namestr.split("g")[0][2:]), float(
-                namestr.split("g")[1][:3])/100.
+
+            if oflag:
+                _teff, _logg = float(namestr.split("g")[0][1:]), float(
+                    namestr.split("g")[1][:3])/100.
+            else:
+                _teff, _logg = float(namestr.split("g")[0][2:]), float(
+                    namestr.split("g")[1][:3])/100.
+
+            print(namestr, _teff, _logg, _Z)
+
+            if oflag and _teff <= 30000:
+                continue
+
             dcont = pd.read_csv(fname_cont, names=["wav", "flux"], sep="\s+")
             func = interp1d(dcont.wav, dcont.flux)
             di = pd.read_csv(fname_spec, names=["wav", "flux"], sep="\s+")
@@ -392,8 +402,20 @@ def compute_grid_tlusty(wminaa, wmaxaa, data_dir, output_dir, print_info=False, 
     for i, t in enumerate(teff):
         for j, g in enumerate(logg):
             for k, z in enumerate(logZ):
-                _d = d[(d.teff == t) & (d.logg == g) &
-                       (d.logZ == z)]
+                subset = d[(d.teff == t) & (d.logZ == z)]
+
+                # Check if the exact logg exists
+                if g in subset.logg.values:
+                    _d = subset[subset.logg == g]
+                else:
+                    # Find the closest logg
+                    closest_g = subset.logg.iloc[np.argmin(
+                        np.abs(subset.logg - g))]
+                    print('logg =', g, 'not found; using',
+                          closest_g, 'instead.')
+                    _d = subset[subset.logg == closest_g]
+
+                # _d = d[(d.teff == t) & (d.logg == g) & (d.logZ == z)]
                 pgrid2d[i][j][k] = interp1d(_d.wav, _d["flux"])(wavarr)
     print("# grid shape:", np.shape(pgrid2d))
 
