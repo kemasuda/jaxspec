@@ -1,4 +1,4 @@
-__all__ = ["SpecGrid", "SpecGridBosz"]
+__all__ = ["SpecGrid", "SpecGridBosz", "SpecGridTlusty"]
 
 import numpy as np
 import jax.numpy as jnp
@@ -199,3 +199,84 @@ class SpecGridBosz:
         vidx = (vmic - self.v0) / self.dv
         wavidx = (wav - self.wav0[:, np.newaxis]) / self.dwav[:, np.newaxis]
         return interpolate_flux_bosz_vmap(self.fluxgrid, tidx, gidx, midx, aidx, cidx, vidx, wavidx)
+
+
+def interpolate_flux_tlusty(fgrid, tidx, gidx, zidx, wavidx):
+    """interpolate flux grid using map_coordinates
+
+        Args:
+            fgrid: flux grid
+            tidx: index for Teff
+            gidx: index for logg
+            zidx: index for log(Z/Zsun)
+            wavidx: index for wavelength
+
+        Returns:
+            2D array: linearly interpolated flux at a given set of indices
+                -inf returned if the index set is out of the valid range
+
+    """
+    return mapc(fgrid, [tidx, gidx, zidx, wavidx], order=1, cval=-jnp.inf)
+
+
+# map interpolate_flux along the 1st axis
+# return flux arrays for multiple orders
+interpolate_flux_tlusty_vmap = vmap(
+    interpolate_flux_tlusty, (0, 0, 0, 0, 0), 0)
+
+
+class SpecGridTlusty:
+    """ a minimal class to handle grid spectrum data
+    """
+
+    def __init__(self, paths):
+        """ initialization
+
+            Args:
+                paths: paths for grid files
+
+        """
+        grids = [np.load(path) for path in paths]
+        self.tgrid = np.array(grids[0]['tgrid'])
+        self.ggrid = np.array(grids[0]['ggrid'])
+        self.zgrid = np.array(grids[0]['zgrid'])
+        self.num_grids = len(grids)
+        # self.vgrid = np.array(grids[0]['vgrid'])
+
+        self.wavgrid = np.array([grid['wavgrid'] for grid in grids])
+        self.logwavgrid = np.log(self.wavgrid)
+        self.wav0 = np.array([grid['wavgrid'][0] for grid in grids])
+        self.dwav = np.diff(self.wavgrid)[:, 0]
+        self.wavmin = np.min(self.wavgrid, axis=1)
+        self.wavmax = np.max(self.wavgrid, axis=1)
+        self.fluxgrid = np.array([grid['flux'] for grid in grids])
+
+        self.model = 'tlusty'
+
+        step = np.diff(grids[0]['wavgrid'])
+        smin, smax = np.min(step), np.max(step)
+        assert np.abs(smax/smin - 1.) < 0.01, f"wavgrid is not equally spaced."
+
+    @partial(jit, static_argnums=(0,))
+    def values(self, teff, logg, logZ, wav):
+        """ compute flux values interpolating the model grids
+
+            Args:
+                teff: effective temperature
+                logg: surface gravity
+                logZ: log10(Z/Z_sun)
+                vmic: microturbulence velocity
+                wav: wavelengths (in angstrom??), (Norder, Npix)
+
+            Returns:
+                2D array: interpolated flux (Norder, Npix)
+
+        """
+        tidx = jnp.array(
+            [jnp.interp(teff, self.tgrid, jnp.arange(len(self.tgrid)))]*self.num_grids)
+        gidx = jnp.array(
+            [jnp.interp(logg, self.ggrid, jnp.arange(len(self.ggrid)))]*self.num_grids)
+        zidx = jnp.array(
+            [jnp.interp(logZ, self.zgrid, jnp.arange(len(self.zgrid)))]*self.num_grids)
+        wavidx = (wav - self.wav0[:, np.newaxis]) / self.dwav[:, np.newaxis]
+        return interpolate_flux_tlusty_vmap(self.fluxgrid, tidx, gidx, zidx, wavidx)
