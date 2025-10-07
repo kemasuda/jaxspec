@@ -101,19 +101,24 @@ class SpecModel2(SpecModel):
                 flux model (Norder, Npix) at wav_obs
 
         """
-        c0, c1, teff1, teff2, logg1, logg2, alpha1, alpha2, vsini1, vsini2, zeta1, zeta2, res, rv1, rv2, u11, u12, u21, u22, f2_f1 \
-            = par["norm"], par["slope"], par["teff1"], par["teff2"], par["logg1"], par["logg2"], par["alpha1"], par["alpha2"], par["vsini1"], par["vsini2"], par["zeta1"], par["zeta2"], par['wavres'], par["rv1"], par["rv2"], par['u11'], par['u12'], par['u21'], par['u22'], par['f2_f1']
+        c0, c1, teff1, teff2, logg1, logg2, vsini1, vsini2, zeta1, zeta2, res, rv1, rv2, u11, u12, u21, u22, f2_f1 \
+            = par["norm"], par["slope"], par["teff1"], par["teff2"], par["logg1"], par["logg2"], par["vsini1"], par["vsini2"], par["zeta1"], par["zeta2"], par['wavres'], par["rv1"], par["rv2"], par['u11'], par['u12'], par['u21'], par['u22'], par['f2_f1']
         wav_out = self.wav_obs
         if self.sg.model == 'bosz':
             flux_raw1 = self.sg.values(
-                teff1, logg1, par["mh1"], alpha1, par['carbon1'], par['vmic1'], self.wavgrid)
+                teff1, logg1, par["mh1"], par["alpha1"], par['carbon1'], par['vmic1'], self.wavgrid)
             flux_raw2 = self.sg.values(
-                teff2, logg2, par["mh2"], alpha2, par['carbon2'], par['vmic2'], self.wavgrid)
+                teff2, logg2, par["mh2"], par["alpha2"], par['carbon2'], par['vmic2'], self.wavgrid)
+        elif self.sg.model == 'tlusty':
+            flux_raw1 = self.sg.values(
+                teff1, logg1, par["logZ1"], self.wavgrid)
+            flux_raw2 = self.sg.values(
+                teff2, logg2, par["logZ2"], self.wavgrid)
         else:
             flux_raw1 = self.sg.values(
-                teff1, logg1, par["feh1"], alpha1, self.wavgrid)
+                teff1, logg1, par["feh1"], par["alpha1"], self.wavgrid)
             flux_raw2 = self.sg.values(
-                teff2, logg2, par["feh2"], alpha2, self.wavgrid)
+                teff2, logg2, par["feh2"], par["alpha2"], self.wavgrid)
 
         flux_base = c0[:, jnp.newaxis] + c1[:, jnp.newaxis] * (wav_out - jnp.mean(
             self.wav_obs, axis=1)[:, jnp.newaxis]) / self.wav_obs_range[:, jnp.newaxis]

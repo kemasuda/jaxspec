@@ -90,8 +90,8 @@ class SpecFit:
         self.sm = SpecModel(_sg, wav_obs, flux_obs,
                             error_obs, mask_obs, vmax=vmax, gpu=gpu)
         self.orders = orders
-        self.wavresmin = [wavres_default]*len(orders)
-        self.wavresmax = [wavres_default]*len(orders)
+        self.wavresmin = np.array([wavres_default]*len(orders))
+        self.wavresmax = np.array([wavres_default]*len(orders))
         self.ccfrvlist = None
         self.ccfvbroad = None
         self.rvbounds = None
@@ -366,11 +366,11 @@ def extend_mask(flag):
 class SpecFit2(SpecFit):
     """ SB2 """
 
-    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4.):
+    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., model='coelho', wavres_default=70000., gridtag=''):
         wav_obs, flux_obs, error_obs, mask_obs = data
         assert np.shape(wav_obs)[0] == len(orders)
 
-        wavranges, paths = get_grid_wavranges_and_paths(gridpath)
+        wavranges, paths = get_grid_wavranges_and_paths(gridpath, gridtag)
         paths_order = []
         for i, wobs in enumerate(wav_obs):
             wobsmin, wobsmax = wobs.min(), wobs.max()
@@ -385,11 +385,17 @@ class SpecFit2(SpecFit):
                 wavranges[grididx, 1] - wobs) > wav_margin, "observed wavelengths of margin."
             paths_order.append(paths[grididx])
 
-        self.sm = SpecModel2(SpecGrid(paths_order), wav_obs,
-                             flux_obs, error_obs, mask_obs)
+        if model == 'bosz':
+            _sg = SpecGridBosz(paths_order)
+        elif model == 'tlusty':
+            _sg = SpecGridTlusty(paths_order)
+        else:
+            _sg = SpecGrid(paths_order)
+        self.sm = SpecModel2(_sg, wav_obs,
+                             flux_obs, error_obs, mask_obs, vmax=vmax)
         self.orders = orders
-        self.wavresmin = [70000.]*len(orders)
-        self.wavresmax = [70000.]*len(orders)
+        self.wavresmin = np.array([wavres_default]*len(orders))
+        self.wavresmax = np.array([wavres_default]*len(orders))
         self.ccfrvlist = None
         self.ccfvbroad = None
         self.rvbounds = None
@@ -398,6 +404,7 @@ class SpecFit2(SpecFit):
         self.bounds = None
         self.v1 = None
         self.v2 = None
+        self.vmax = vmax  # necessary?
 
     def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., output_dir=None, ccfvmax=100., tag=''):
         vgrids, ccfs, ccffuncs = [], [], []
@@ -405,6 +412,9 @@ class SpecFit2(SpecFit):
         if sm.sg.model == 'bosz':
             wmodels, fmodels = sm.wavgrid, sm.sg.values(
                 teff, logg, feh, alpha, 0., 1., sm.wavgrid)
+        elif sm.sg.model == 'tlusty':
+            wmodels, fmodels = sm.wavgrid, sm.sg.values(
+                teff, logg, feh, sm.wavgrid)
         else:
             wmodels, fmodels = sm.wavgrid, sm.sg.values(
                 teff, logg, feh, alpha, sm.wavgrid)
