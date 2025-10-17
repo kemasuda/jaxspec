@@ -281,9 +281,9 @@ class SpecFit:
                 else:
                     mask_v = max(p_fit['vsini1'], p_fit['vsini2'])
             npix_mask = int(
-                np.median(x) * mask_v * 8 / 3e5 / np.median(np.diff(x))) + 1
+                np.median(x) * mask_v * 2 / 3e5 / np.median(np.diff(x))) * 4 + 1
             yres_phys_smoothed = medfilt(yres_phys, kernel_size=npix_mask)
-            yres_res = (yres_phys - yres_phys_smoothed) / err
+            yres_res = (yres_phys - yres_phys_smoothed)
             sigma_cut = 1.4826 * mad(yres_res[~clip])
             # mask_obs and mask_fit are exclusive
             flag_outlier = (np.abs(yres_res) >
@@ -310,10 +310,10 @@ class SpecFit:
             # ax2.set_ylim(ax2.get_ylim())
             # ax2.plot(x[clip], yres_phys[clip], 'x', lw=1, markersize=3)
 
-            ax3.plot(x[~clip], yres_res[~clip], 'o',
+            ax3.plot(x[~clip], yres_res[~clip]/sigma_cut, 'o',
                      color='gray', mfc='none', mew=0.5, markersize=3, alpha=0.6)
             ax3.plot(x[~clip & (flag_outlier)], yres_res[~clip & (
-                flag_outlier)], 'o', color='salmon', lw=1, markersize=3)
+                flag_outlier)]/sigma_cut, 'o', color='salmon', lw=1, markersize=3)
             ax3.set_ylabel("residual / error")
             ax3.set_xlabel("wavelength (A)")
 
