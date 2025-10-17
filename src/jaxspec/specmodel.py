@@ -1,13 +1,10 @@
-__all__ = ["SpecModel", "SpecModel2"]
+__all__ = ["SpecModel", "SpecModel2", "SpecModelN"]
 
 import numpy as np
 import jax.numpy as jnp
 from jax import jit
 from functools import partial
 from .utils import *
-from celerite2.jax import terms as jax_terms
-from celerite2.jax import GaussianProcess
-import tinygp
 
 
 class SpecModel:
@@ -125,4 +122,71 @@ class SpecModel2(SpecModel):
         flux_sum = broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw1, vsini1, zeta1, get_beta(
             res), rv1, self.varr, u11, u21) + f2_f1 * broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw2, vsini2, zeta2, get_beta(res), rv2, self.varr, u12, u22)
         flux_phys = flux_base * flux_sum / (1. + f2_f1)
+        return flux_phys
+
+
+class SpecModelN(SpecModel):
+    """ class to compute spectrum model for SB-N
+    """
+
+    def __init__(self, sg, wav_obs, flux_obs, error_obs, mask_obs, vmax=50., gpu=False):
+        """ initialization
+
+                Args:
+                    sg: SpecGrid instance
+                    wav_obs: observed wavelengths (Norder, Npix)
+                    flux_obs: observed flux (Norder, Npix)
+                    error_obs: error (Norder, Npix)
+                    mask_obs: if True the data point is omitted from the entire analysis (Norder, Npix)
+                            self.mask_fit is similar, but may be changed iteratively during fitting
+                    vmax: maximum velocity width for the broadening kernel
+                            defaults to 50; needs to be increased if vsini is large
+
+            """
+        super().__init__(sg, wav_obs, flux_obs, error_obs, mask_obs, vmax=vmax, gpu=gpu)
+
+    @partial(jit, static_argnums=(0,))
+    def fluxmodel_multiorder(self, par):
+        """ broadened & shifted flux model; including order-dependent linear continua
+
+            Returns:
+                flux model (Norder, Npix) at wav_obs
+
+        """
+        c0, c1, teff, logg, vsini, zeta, res, rv, u1, u2, _flux_ratio \
+            = par["norm"], par["slope"], par["teff"], par["logg"], par["vsini"], par["zeta"], par['wavres'], par["rv"], par['u1'], par['u2'], par['flux_ratio']
+        wav_out = self.wav_obs
+
+        # assert jnp.sum(_flux_ratio) < 1.
+        flux_ratio = jnp.concatenate(
+            [jnp.array([1.0 - jnp.sum(_flux_ratio)]), _flux_ratio])
+
+        N = len(teff)
+        flux_sum = jnp.zeros_like(self.wav_obs)
+        if self.sg.model == 'bosz':
+            mh, alpha, carbon, vmic = par["mh"], par["alpha"], par["carbon"], par["vmic"]
+            for i in range(N):
+                flux_raw = flux_ratio[i] * self.sg.values(
+                    teff[i], logg[i], mh[i], alpha[i], carbon[i], vmic[i], self.wavgrid)
+                flux_sum += broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw, vsini[i], zeta[i], get_beta(
+                    res), rv[i], self.varr, u1[i], u2[i])
+        elif self.sg.model == 'tlusty':
+            logZ = par["logZ"]
+            for i in range(N):
+                flux_raw = flux_ratio[i] * self.sg.values(
+                    teff[i], logg[i], logZ[i], self.wavgrid)
+                flux_sum += broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw, vsini[i], zeta[i], get_beta(
+                    res), rv[i], self.varr, u1[i], u2[i])
+        else:
+            feh, alpha = par["feh"], par["alpha"]
+            for i in range(N):
+                flux_raw = flux_ratio[i] * self.sg.values(
+                    teff[i], logg[i], feh[i], alpha[i], self.wavgrid)
+                flux_sum += broaden_and_shift_vmap_full(wav_out, self.wavgrid, flux_raw, vsini[i], zeta[i], get_beta(
+                    res), rv[i], self.varr, u1[i], u2[i])
+
+        flux_base = c0[:, jnp.newaxis] + c1[:, jnp.newaxis] * (wav_out - jnp.mean(
+            self.wav_obs, axis=1)[:, jnp.newaxis]) / self.wav_obs_range[:, jnp.newaxis]
+        flux_phys = flux_base * flux_sum
+
         return flux_phys

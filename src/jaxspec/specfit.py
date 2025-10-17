@@ -3,10 +3,10 @@ from scipy.signal import medfilt
 import jaxopt
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-from .specmodel import SpecModel, SpecModel2
+from .specmodel import SpecModel, SpecModel2, SpecModelN
 from .specgrid import SpecGrid, SpecGridBosz, SpecGridTlusty
 from .utils import *
-__all__ = ["SpecFit", "SpecFit2"]
+__all__ = ["SpecFit", "SpecFit2", "SpecFitN"]
 
 
 import numpy as np
@@ -270,19 +270,19 @@ class SpecFit:
                             (tag, order), dpi=200, bbox_inches="tight")
                 plt.close()
 
-    def mask_outliers(self, p_fit, sigma_threshold=3., output_dir=None, extend_outlier_mask=True):
+    def mask_outliers(self, p_fit, sigma_threshold=5., output_dir=None, extend_outlier_mask=True, mask_v=None):
         for i in range(self.sm.Norder):
             x, y, err = self.sm.wav_obs[i], self.sm.flux_obs[i], self.sm.error_obs[i]
             clip = self.sm.mask_obs[i]
             yres_phys = y - p_fit['fluxmodel'][i]
-            # for median filtering
-            if 'vsini' in p_fit.keys():
-                vsini = p_fit['vsini']
-            else:
-                vsini = max(p_fit['vsini1'], p_fit['vsini2'])
-            npix_vsini = int(
-                np.median(x) * vsini * 2 / 3e5 / np.median(np.diff(x))) * 4 + 1
-            yres_phys_smoothed = medfilt(yres_phys, kernel_size=npix_vsini)
+            if mask_v is None:
+                if 'vsini' in p_fit.keys():
+                    mask_v = np.max(p_fit['vsini'])
+                else:
+                    mask_v = max(p_fit['vsini1'], p_fit['vsini2'])
+            npix_mask = int(
+                np.median(x) * mask_v * 8 / 3e5 / np.median(np.diff(x))) + 1
+            yres_phys_smoothed = medfilt(yres_phys, kernel_size=npix_mask)
             yres_res = (yres_phys - yres_phys_smoothed) / err
             sigma_cut = 1.4826 * mad(yres_res[~clip])
             # mask_obs and mask_fit are exclusive
@@ -490,3 +490,58 @@ class SpecFit2(SpecFit):
         self.ccfvbroad = vbroad
 
         return rvgrid, medccf
+
+
+class SpecFitN(SpecFit):
+    """ SB-N """
+
+    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., gpu=False, model='coelho', wavres_default=70000., gridtag=''):
+        """initialization
+
+            Args:
+                gridpath: path for model grid files
+                data: list of (wavelength, flux, error, mask)
+                orders: list of int specifying orders
+                vmax: wdith of the velocity grid for line profile calcuation
+                wav_margin: wavelength margin required for the model grid
+                gpu: Gaussian Process for GPU (not tested)
+                model: grid model, 'bosz' for BOSZ grid, 'coelho' for others
+                wavres_default: default wavelength resolution
+
+        """
+        wav_obs, flux_obs, error_obs, mask_obs = data
+        assert np.shape(wav_obs)[0] == len(orders)
+
+        wavranges, paths = get_grid_wavranges_and_paths(gridpath, gridtag)
+        paths_order = []
+        for i, wobs in enumerate(wav_obs):
+            wobsmin, wobsmax = wobs.min(), wobs.max()
+            grididx = np.where((wavranges[:, 0] < wobsmin) & (
+                wavranges[:, 1] > wobsmax))[0]
+            assert len(
+                grididx) == 1, "grid data for order %d not found." % orders[i]
+            grididx = int(grididx)
+            assert np.min(
+                wobs - wavranges[grididx, 0]) > wav_margin, "observed wavelengths outside of margin."
+            assert np.min(
+                wavranges[grididx, 1] - wobs) > wav_margin, "observed wavelengths outside of margin."
+            paths_order.append(paths[grididx])
+
+        if model == 'bosz':
+            _sg = SpecGridBosz(paths_order)
+        elif model == 'tlusty':
+            _sg = SpecGridTlusty(paths_order)
+        else:
+            _sg = SpecGrid(paths_order)
+        self.sm = SpecModelN(_sg, wav_obs, flux_obs,
+                             error_obs, mask_obs, vmax=vmax, gpu=gpu)
+        self.orders = orders
+        self.wavresmin = np.array([wavres_default]*len(orders))
+        self.wavresmax = np.array([wavres_default]*len(orders))
+        self.ccfrvlist = None
+        self.ccfvbroad = None
+        self.rvbounds = None
+        self.params_opt = None
+        self.pnames = None
+        self.bounds = None
+        self.vmax = vmax
