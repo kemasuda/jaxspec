@@ -58,7 +58,7 @@ def doppler_shift(xout, xin, yin, v):
             Doppler-shifted flux at xout
 
     """
-    x_shifted = xin * (1. + v / c_in_kms)
+    x_shifted = xin * jnp.sqrt((1. + v / c_in_kms) / (1. - v / c_in_kms))
     return jnp.interp(xout, x_shifted, yin)
 
 
