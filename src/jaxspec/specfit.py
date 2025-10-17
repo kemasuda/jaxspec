@@ -49,7 +49,7 @@ def get_grid_wavranges_and_paths(gridpath, gridtag):
 class SpecFit:
     """class for spectrum fitting"""
 
-    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., gpu=False, model='coelho', wavres_default=70000., gridtag=''):
+    def __init__(self, gridpath, data, orders, vmax=50., wav_margin=4., gpu=False, model='coelho', wavres_default=70000., gridtag='', mask_nan=True):
         """initialization
 
             Args:
@@ -65,6 +65,10 @@ class SpecFit:
         """
         wav_obs, flux_obs, error_obs, mask_obs = data
         assert np.shape(wav_obs)[0] == len(orders)
+        if mask_nan:
+            for i in range(len(wav_obs)):
+                mask_obs[i] |= np.isnan(flux_obs[i])
+                mask_obs[i] |= np.isnan(error_obs[i])
 
         wavranges, paths = get_grid_wavranges_and_paths(gridpath, gridtag)
         paths_order = []
