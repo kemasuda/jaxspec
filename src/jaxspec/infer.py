@@ -10,12 +10,11 @@ from jax import random
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoLaplaceApproximation
 from numpyro.infer.initialization import init_to_value, init_to_sample
-import celerite2
 import tinygp
-from celerite2.jax import terms as jax_terms
+from tinygp.kernels import quasisep as qk
 
 
-def get_parameter_bounds(sf, slope_max=0.2, zeta_max=10., model='coelho'):
+def get_parameter_bounds(sf, slope_max=0.2, zeta_max=10., vsini_max=None, model='coelho'):
     """parameter bounds for optimization
 
         Args:
@@ -27,7 +26,8 @@ def get_parameter_bounds(sf, slope_max=0.2, zeta_max=10., model='coelho'):
     ones = jnp.ones(sf.sm.Norder)
     sgrid = sf.sm.sg
 
-    vsini_max = sf.ccfvbroad
+    if vsini_max is None:
+        vsini_max = sf.ccfvbroad
     rvmean = sigma_clipped_stats(sf.ccfrvlist)[0]
     if vsini_max < 20:
         rvmin, rvmax = rvmean - 5., rvmean + 5.
@@ -118,21 +118,16 @@ def get_mean_models(samples, sf):
 
     sm = sf.sm
     idx = ~(sm.mask_obs+sm.mask_fit > 0)
-    kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+    kernel = qk.Matern32(sigma=jnp.exp(lna), scale=jnp.exp(lnc))
     diags = sm.error_obs**2 + jnp.exp(2*lnsigma)
 
     mgps = []
     for j in range(len(idx)):
         idxj = idx[j]
         res = np.mean(samples['flux_residual%d' % j], axis=0)
-        if not sm.gpu:
-            gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
-            gp.compute(sm.wav_obs[j][idxj], diag=diags[j][idxj])
-            mgp = gp.predict(res, t=sm.wav_obs[j])
-        else:
-            gp = tinygp.GaussianProcess(
-                kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
-            mgp = gp.predict(res, X_test=sm.wav_obs[j])
+        gp = tinygp.GaussianProcess(
+            kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
+        mgp = gp.predict(res, X_test=sm.wav_obs[j])
         mgps.append(mgp)
 
     return ms, np.array(mgps) + ms

@@ -55,13 +55,22 @@ air_or_vac = "vac"
 '''
 
 # %% input and output directories: HDS Yb red
+'''
 wavgrid_length = 5000
 data_dir = "/Users/k_masuda/data/s_coelho05/"
 output_dir = "/Users/k_masuda/data/specgrid_hdsYbred_coelho/"
 d = pd.read_csv("wavranges_hds-Ybred.csv")
 wavfactor = 1.
 air_or_vac = "air"
+'''
 
+wavgrid_length = 5000
+data_dir = "/Users/k_masuda/data/s_coelho05/"
+output_dir = "/Users/k_masuda/data/specgrid_absolute_hdsYbred_coelho/"
+d = pd.read_csv("wavranges_hds-Ybred.csv")
+wavfactor = 1.
+air_or_vac = "air"
+normalized = False
 
 # %%
 wmargin = 5  # margin in AA
@@ -70,7 +79,8 @@ for i in range(1, len(d)):
     wmax_aa = int(d.iloc[i].wavmax*wavfactor) + wmargin
     print("#", wmin_aa, wmax_aa)
     output = compute_grid_coelho(model_params, wmin_aa, wmax_aa, data_dir=data_dir,
-                                 output_dir=output_dir, air_or_vac=air_or_vac, fixed_wavgrid_length=wavgrid_length)
+                                 output_dir=output_dir, air_or_vac=air_or_vac, fixed_wavgrid_length=wavgrid_length,
+                                 normalized=normalized)
 
 
 # %%

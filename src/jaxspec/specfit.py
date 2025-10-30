@@ -1,6 +1,5 @@
 from scipy.stats import median_abs_deviation as mad
 from scipy.signal import medfilt
-import jaxopt
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from .specmodel import SpecModel, SpecModel2, SpecModelN
@@ -274,7 +273,7 @@ class SpecFit:
                             (tag, order), dpi=200, bbox_inches="tight")
                 plt.close()
 
-    def mask_outliers(self, p_fit, sigma_threshold=5., output_dir=None, extend_outlier_mask=True, mask_v=None):
+    def mask_outliers(self, p_fit, sigma_threshold=5., output_dir=None, extend_outlier_mask=True, mask_v=None, tag=''):
         for i in range(self.sm.Norder):
             x, y, err = self.sm.wav_obs[i], self.sm.flux_obs[i], self.sm.error_obs[i]
             clip = self.sm.mask_obs[i]
@@ -325,8 +324,8 @@ class SpecFit:
             fig.tight_layout(pad=0.2)
 
             if output_dir is not None:
-                plt.savefig(output_dir+"outlier_order%02d.png" %
-                            self.orders[i], dpi=200, bbox_inches="tight")
+                plt.savefig(output_dir+"outlier%s_order%02d.png" %
+                            (tag, self.orders[i]), dpi=200, bbox_inches="tight")
                 plt.close()
 
         return None
@@ -410,7 +409,9 @@ class SpecFit2(SpecFit):
         self.v2 = None
         self.vmax = vmax  # necessary?
 
-    def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., output_dir=None, ccfvmax=100., tag=''):
+    def check_ccf(self, teff=5800, logg=4.4, feh=0., alpha=0., output_dir=None, ccfvmax=100., tag='', drvmin=0., drvmax=300., ylim_tuple=None):
+        import jaxopt
+
         vgrids, ccfs, ccffuncs = [], [], []
         sm = self.sm
         if sm.sg.model == 'bosz':
@@ -454,7 +455,7 @@ class SpecFit2(SpecFit):
 
         solver = jaxopt.ScipyBoundedMinimize(fun=objective, method="TNC")
         res = solver.run([v1, v2-v1, 5., 1., 1.], bounds=([v1-10,
-                         0, 5., 0.5, 0.5], [v1+10, 300, 5., 1., 1.]))
+                         drvmin, 5., 0.5, 0.5], [v1+10, drvmax, 5., 1., 1.]))
         v1opt, dvopt, sigopt, aopt, bopt = res.params
 
         self.v1 = v1opt
@@ -467,6 +468,8 @@ class SpecFit2(SpecFit):
         plt.xlim(ccfrv-ccfvmax, ccfrv+ccfvmax)
         plt.xlabel("radial velocity (km/s)")
         plt.ylabel("normalized CCF")
+        if ylim_tuple is not None:
+            plt.ylim(ylim_tuple)
         # plt.axvline(x=ccfrv, label='median: %.1fkm/s'%ccfrv, color='gray', lw=2, alpha=0.4)
         plt.axvline(x=self.v1, label='star1: %.1fkm/s' %
                     self.v1, color='C0', lw=1.5, alpha=0.4, ls='dashed')

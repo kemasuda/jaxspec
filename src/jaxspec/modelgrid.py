@@ -27,7 +27,7 @@ def air_to_vac(wav_air_aa):
     return wav_air_aa * n
 
 
-def compute_grid_coelho(model_params, wmin, wmax, data_dir, output_dir, fixed_wavgrid_length=5000, air_or_vac="vac"):
+def compute_grid_coelho(model_params, wmin, wmax, data_dir, output_dir, fixed_wavgrid_length=5000, air_or_vac="vac", normalized=True):
     """ compute spectrum grid using the Coelho model
 
         Args:
@@ -65,7 +65,10 @@ def compute_grid_coelho(model_params, wmin, wmax, data_dir, output_dir, fixed_wa
             print(filepath, "does not exist.")
 
         header = fits.open(filepath)[0].header
-        flux = fits.open(filepath)[0].data[0]
+        if normalized:
+            flux = fits.open(filepath)[0].data[0]
+        else:
+            flux = fits.open(filepath)[0].data[1]
         wavs = header['CRVAL1'] + np.arange(len(flux))*header['CD1_1']
         if air_or_vac == "vac":
             wavs = air_to_vac(wavs)

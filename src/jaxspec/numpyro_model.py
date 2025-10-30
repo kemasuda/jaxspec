@@ -5,9 +5,7 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import tinygp
-from numpyro.infer import init_to_value
-import celerite2
-from celerite2.jax import terms as jax_terms
+from tinygp.kernels import quasisep as qk
 from .utils import *
 
 
@@ -20,7 +18,7 @@ def get_empirical_vmic(teff, logg, feh):
     return vmic
 
 
-def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, empirical_vmic=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False, physical_logg_max=False, save_pred=False):
+def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, empirical_vmic=True, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False, physical_logg_max=False, save_pred=False):
     """model for a single star
 
         Args:
@@ -95,10 +93,7 @@ def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, e
 
     lna = numpyro.sample("lna", dist.Uniform(low=-5, high=-0.5))
     lnc = numpyro.sample("lnc", dist.Uniform(low=-5, high=lnc_max))
-    if _sm.gpu:
-        kernel = jnp.exp(2*lna) * tinygp.kernels.Matern32(jnp.exp(lnc))
-    else:
-        kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+    kernel = qk.Matern32(sigma=jnp.exp(lna), scale=jnp.exp(lnc))
     lnsigma = numpyro.sample(
         "lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
     diags = _sm.error_obs**2 + jnp.exp(2*lnsigma)
@@ -107,18 +102,14 @@ def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, e
     idx = ~mask_all
     for j in range(len(fluxmodel)):
         idxj = idx[j]
-        if _sm.gpu:
-            gp = tinygp.GaussianProcess(
-                kernel, _sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
-        else:
-            gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
-            gp.compute(_sm.wav_obs[j][idxj], diag=diags[j][idxj])
+        gp = tinygp.GaussianProcess(
+            kernel, _sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
         flux_residual = numpyro.deterministic(
             "flux_residual%d" % j, _sm.flux_obs[j][idxj] - fluxmodel[j][idxj])
         numpyro.sample("obs%d" % j, gp.numpyro_dist(), obs=flux_residual)
         if save_pred:
             numpyro.deterministic("pred%d" % j, gp.predict(
-                flux_residual, t=_sm.wav_obs[j]))
+                flux_residual, X_test=_sm.wav_obs[j]))
 
 
 def model_sb2(sf, param_bounds, empirical_vmacro=False, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., physical_logg_max=False, save_pred=False):
@@ -203,10 +194,7 @@ def model_sb2(sf, param_bounds, empirical_vmacro=False, lnsigma_max=-3, single_w
 
     lna = numpyro.sample("lna", dist.Uniform(low=-5, high=-0.5))
     lnc = numpyro.sample("lnc", dist.Uniform(low=-5, high=lnc_max))
-    if _sm.gpu:
-        kernel = jnp.exp(2*lna) * tinygp.kernels.Matern32(jnp.exp(lnc))
-    else:
-        kernel = jax_terms.Matern32Term(sigma=jnp.exp(lna), rho=jnp.exp(lnc))
+    kernel = qk.Matern32(sigma=jnp.exp(lna), scale=jnp.exp(lnc))
     lnsigma = numpyro.sample(
         "lnsigma", dist.Uniform(low=-10, high=lnsigma_max))
     diags = _sm.error_obs**2 + jnp.exp(2*lnsigma)
@@ -215,18 +203,14 @@ def model_sb2(sf, param_bounds, empirical_vmacro=False, lnsigma_max=-3, single_w
     idx = ~mask_all
     for j in range(len(fluxmodel)):
         idxj = idx[j]
-        if _sm.gpu:
-            gp = tinygp.GaussianProcess(
-                kernel, _sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
-        else:
-            gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
-            gp.compute(_sm.wav_obs[j][idxj], diag=diags[j][idxj])
+        gp = tinygp.GaussianProcess(
+            kernel, _sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
         flux_residual = numpyro.deterministic(
             "flux_residual%d" % j, _sm.flux_obs[j][idxj] - fluxmodel[j][idxj])
         numpyro.sample("obs%d" % j, gp.numpyro_dist(), obs=flux_residual)
         if save_pred:
             numpyro.deterministic("pred%d" % j, gp.predict(
-                flux_residual, t=_sm.wav_obs[j]))
+                flux_residual, X_test=_sm.wav_obs[j]))
 
 
 def get_mean_models(samples, sf):
@@ -247,25 +231,16 @@ def get_mean_models(samples, sf):
 
     sm = sf.sm
     idx = ~(sm.mask_obs + sm.mask_fit > 0)
-    if not sm.gpu:
-        kernel = jax_terms.Matern32Term(
-            sigma=jnp.exp(lna), rho=jnp.exp(lnc))
-    else:
-        kernel = jnp.exp(2*lna) * tinygp.kernels.Matern32(jnp.exp(lnc))
+    kernel = qk.Matern32(sigma=jnp.exp(lna), scale=jnp.exp(lnc))
     diags = sm.error_obs**2 + jnp.exp(2*lnsigma)
 
     mgps = []
     for j in range(len(idx)):
         idxj = idx[j]
         res = np.mean(samples['flux_residual%d' % j], axis=0)
-        if not sm.gpu:
-            gp = celerite2.jax.GaussianProcess(kernel, mean=0.0)
-            gp.compute(sm.wav_obs[j][idxj], diag=diags[j][idxj])
-            mgp = gp.predict(res, t=sm.wav_obs[j])
-        else:
-            gp = tinygp.GaussianProcess(
-                kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
-            mgp = gp.predict(res, X_test=sm.wav_obs[j])
+        gp = tinygp.GaussianProcess(
+            kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
+        mgp = gp.predict(res, X_test=sm.wav_obs[j])
         mgps.append(mgp)
 
     return ms, np.array(mgps) + ms
