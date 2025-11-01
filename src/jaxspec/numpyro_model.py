@@ -18,7 +18,7 @@ def get_empirical_vmic(teff, logg, feh):
     return vmic
 
 
-def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, empirical_vmic=True, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., logg_min=3., fit_dilution=False, physical_logg_max=False, save_pred=False):
+def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, empirical_vmic=True, lnsigma_max=-3, single_wavres=False, zeta_max=10., slope_max=0.2, lnc_max=2., fit_dilution=False, physical_logg_max=False, save_pred=False):
     """model for a single star
 
         Args:
