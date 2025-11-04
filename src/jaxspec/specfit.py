@@ -57,9 +57,10 @@ class SpecFit:
                 orders: list of int specifying orders
                 vmax: wdith of the velocity grid for line profile calcuation
                 wav_margin: wavelength margin required for the model grid
-                gpu: Gaussian Process for GPU (not tested)
+                gpu: Gaussian Process for GPU (deprecated)
                 model: grid model, 'bosz' for BOSZ grid, 'coelho' for others
                 wavres_default: default wavelength resolution
+                mask_nan: if True, data with NaN are masked and NaN flux values are set to 1.
 
         """
         wav_obs, flux_obs, error_obs, mask_obs = data
@@ -68,6 +69,9 @@ class SpecFit:
             for i in range(len(wav_obs)):
                 mask_obs[i] |= np.isnan(flux_obs[i])
                 mask_obs[i] |= np.isnan(error_obs[i])
+                flux_obs[i] = np.where(np.isnan(flux_obs[i]), 1., flux_obs[i])
+                print(
+                    f"Order {i}: data containing NaN masked; NaN flux set to 1.")
 
         wavranges, paths = get_grid_wavranges_and_paths(gridpath, gridtag)
         paths_order = []
