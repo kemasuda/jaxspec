@@ -269,7 +269,7 @@ class SpecFit:
             plt.hist(res[idx], bins=bins, alpha=0.4)
             plt.hist(res[idx2], bins=bins, alpha=0.4, label='clipped')
             plt.plot(bins, np.exp(-0.5*(bins-mu)**2/sd**2)/np.sqrt(2 *
-                     np.pi)/sd*np.sum(idx)*np.diff(bins)[0], lw=1, color='gray')
+                     np.pi)/sd*np.sum(idx)*np.diff(bins)[0], lw=1, color='gray', label=f'$\mu={mu:.2f}$, $\sigma={sd:.2f}$')
             plt.ylim(0.1, None)
             plt.legend(loc='upper right')
             if output_dir is not None:

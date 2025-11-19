@@ -123,8 +123,86 @@ def interpolate_flux_bosz(fgrid, tidx, gidx, midx, aidx, cidx, vidx, wavidx):
 
 # map interpolate_flux along the 1st axis
 # return flux arrays for multiple orders
-interpolate_flux_bosz_vmap = vmap(
-    interpolate_flux_bosz, (0, 0, 0, 0, 0, 0, 0, 0), 0)
+# interpolate_flux_bosz_vmap = vmap(
+#    interpolate_flux_bosz, (0, 0, 0, 0, 0, 0, 0, 0), 0)
+
+def safe_map_coordinates(arr, coords, **kwargs):
+    """
+    Drop degenerate (length-1) axes before calling map_coordinates.
+
+    arr   : ndarray (can have axes of length 1)
+    coords: shape (arr.ndim, ...)
+
+    For axes with length 1, we always take index 0 and do not interpolate
+    along that axis.
+    """
+    shape = arr.shape
+    ndim = arr.ndim
+
+    axes_keep = [i for i in range(ndim) if shape[i] > 1]
+
+    # Fast path: no degenerate axes
+    if len(axes_keep) == ndim:
+        return mapc(arr, coords, **kwargs)
+
+    # Drop length-1 axes
+    arr2 = arr
+    coords_list = []
+    for i in range(ndim):
+        if shape[i] > 1:
+            coords_list.append(coords[i])
+        else:
+            # collapse this axis by always taking index 0
+            arr2 = jnp.take(arr2, 0, axis=i)
+
+    coords2 = jnp.stack(coords_list, axis=0)
+    return mapc(arr2, coords2, **kwargs)
+
+
+def interpolate_flux_bosz_vmap(fluxgrid, tidx, gidx, midx, aidx, cidx, vidx, wavidx):
+    """
+    Multilinear interpolation over BOSZ-like grid using safe_map_coordinates.
+
+    Assumes fluxgrid has shape:
+        (Nspec, Nt, Ng, Nm, Na, Nc, Nv, Npix)
+
+    and:
+        tidx, gidx, midx, aidx, cidx, vidx : (Nspec,)
+        wavidx : (Nspec, Npix)
+    """
+
+    def interp_one(flux, t, g, m, a, c, v, w):
+        # flux: (Nt, Ng, Nm, Na, Nc, Nv, Npix)
+        # t,g,m,a,c,v: scalars
+        # w: (Npix,)
+        n_pix = w.shape[-1]
+
+        coords = jnp.stack(
+            [
+                jnp.full((n_pix,), t),  # Teff axis
+                jnp.full((n_pix,), g),  # logg axis
+                jnp.full((n_pix,), m),  # [M/H] axis
+                jnp.full((n_pix,), a),  # [alpha/M] axis
+                jnp.full((n_pix,), c),  # [C/M] axis
+                jnp.full((n_pix,), v),  # vmic axis
+                w,                      # wavelength axis
+            ],
+            axis=0,
+        )
+
+        return safe_map_coordinates(
+            flux,
+            coords,
+            order=1,      # linear
+            mode="nearest",
+        )
+
+    # vmap over the leading "grid" axis
+    return vmap(
+        interp_one,
+        in_axes=(0, 0, 0, 0, 0, 0, 0, 0),
+        out_axes=0,
+    )(fluxgrid, tidx, gidx, midx, aidx, cidx, vidx, wavidx)
 
 
 class SpecGridBosz:
@@ -153,7 +231,11 @@ class SpecGridBosz:
         self.da = np.array([np.diff(grid['agrid'])[0] for grid in grids])
         self.c0 = np.array([grid['cgrid'][0] for grid in grids])
         self.c1 = np.array([grid['cgrid'][-1] for grid in grids])
-        self.dc = np.array([np.diff(grid['cgrid'])[0] for grid in grids])
+        # self.dc = np.array([np.diff(grid['cgrid'])[0] for grid in grids])
+        self.dc = np.array([
+            np.diff(grid['cgrid'])[0] if len(grid['cgrid']) > 1 else 1.0
+            for grid in grids
+        ])
         self.v0 = np.array([grid['vgrid'][0] for grid in grids])
         self.v1 = np.array([grid['vgrid'][-1] for grid in grids])
         self.dv = np.array([np.diff(grid['vgrid'])[0] for grid in grids])
@@ -171,7 +253,11 @@ class SpecGridBosz:
         # check that the grids are equally spaced
         # otherwise the current interpolation does not work
         for key in ['tgrid', 'ggrid', 'mgrid', 'agrid', 'cgrid', 'vgrid', 'wavgrid']:
-            step = np.diff(grids[0][key])
+            # step = np.diff(grids[0][key])
+            arr = grids[0][key]
+            if len(arr) <= 1:
+                continue
+            step = np.diff(arr)
             smin, smax = np.min(step), np.max(step)
             assert np.abs(
                 smax/smin - 1.) < 0.01, f"grid for {key} is not equally spaced."

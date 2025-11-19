@@ -43,10 +43,13 @@ def model_single(sf, param_bounds, empirical_vmacro=False, zeta_emp_scale=1.0, e
             continue
         if key == 'wavres':
             continue
-        par[key+"_scaled"] = numpyro.sample(key+"_scaled", dist.Uniform(
-            jnp.zeros_like(param_bounds[key][0]), jnp.ones_like(param_bounds[key][0])))
-        par[key] = numpyro.deterministic(
-            key, par[key+"_scaled"] * (param_bounds[key][1] - param_bounds[key][0]) + param_bounds[key][0])
+        if np.atleast_1d(param_bounds[key][0])[0] == np.atleast_1d(param_bounds[key][1])[0]:
+            par[key] = numpyro.deterministic(key, param_bounds[key][0])
+        else:
+            par[key+"_scaled"] = numpyro.sample(key+"_scaled", dist.Uniform(
+                jnp.zeros_like(param_bounds[key][0]), jnp.ones_like(param_bounds[key][0])))
+            par[key] = numpyro.deterministic(
+                key, par[key+"_scaled"] * (param_bounds[key][1] - param_bounds[key][0]) + param_bounds[key][0])
 
     if physical_logg_max:
         logg_max = -2.34638497e-08 * \
