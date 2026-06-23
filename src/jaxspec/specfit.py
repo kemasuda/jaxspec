@@ -81,7 +81,7 @@ class SpecFit:
                 wavranges[:, 1] > wobsmax))[0]
             assert len(
                 grididx) == 1, "grid data for order %d not found." % orders[i]
-            grididx = int(grididx)
+            grididx = int(grididx[0])
             assert np.min(
                 wobs - wavranges[grididx, 0]) > wav_margin, "observed wavelengths outside of margin."
             assert np.min(
@@ -334,40 +334,47 @@ class SpecFit:
 
         return None
 
-
-def extend_mask(flag):
-    """extend boolean mask when True repeats
-
-        Args:
-            flag: boolean array
-
-        Returns:
-            extended float array
-
+def extend_mask(flag, factor=1., return_float=True):
     """
+    Extend each consecutive True run by factor * run_length on both sides.
+
+    Args:
+        flag: 1D boolean array
+        factor: extension factor relative to the run length
+                e.g. 0.5 => extend by half the run length on each side
+                     1.0 => extend by the full run length on each side
+                     2.0 => extend by twice the run length on each side
+        return_float: if True, return 0./1. float array
+
+    Returns:
+        extended mask
+    """
+    flag = np.asarray(flag, dtype=bool)
     n = len(flag)
     extended = flag.copy()
 
     start = 0
     while start < n:
-        if flag[start]:  # Found a sequence of True
-            # Count the length of consecutive True's
+        if flag[start]:
             end = start
             while end < n and flag[end]:
                 end += 1
-            length = (end - start) // 2
 
-            # Extend by the length of the sequence on each side
-            left = max(start - length, 0)
-            right = min(end + length, n)
+            run_length = end - start
+            pad = int(np.ceil(factor * run_length))
+
+            left = max(start - pad, 0)
+            right = min(end + pad, n)
             extended[left:right] = True
 
-            # Move start to the end of the current True sequence
             start = end
         else:
             start += 1
 
-    return extended.astype(float)
+    if return_float:
+        return extended.astype(float)
+    
+    return extended
 
 
 class SpecFit2(SpecFit):
