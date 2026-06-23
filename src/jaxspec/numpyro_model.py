@@ -228,7 +228,11 @@ def get_mean_models(samples, sf):
             GP prediction
 
     """
-    ms = np.mean(samples['fluxmodel'], axis=0)
+    fmodel = samples['fluxmodel']
+    if fmodel.ndim == 2:
+        fmodel = fmodel[None,:]
+    ms = np.mean(fmodel, axis=0)
+    
     lna, lnc, lnsigma = np.mean(samples['lna']), np.mean(
         samples['lnc']), np.mean(samples['lnsigma'])
 
@@ -240,7 +244,7 @@ def get_mean_models(samples, sf):
     mgps = []
     for j in range(len(idx)):
         idxj = idx[j]
-        res = np.mean(samples['flux_residual%d' % j], axis=0)
+        res = np.mean(np.atleast_2d(samples['flux_residual%d' % j]), axis=0)
         gp = tinygp.GaussianProcess(
             kernel, sm.wav_obs[j][idxj], diag=diags[j][idxj], mean=0.0)
         mgp = gp.predict(res, X_test=sm.wav_obs[j])
