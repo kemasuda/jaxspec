@@ -1,6 +1,6 @@
 __all__ = []
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __uri__ = "none"
 __author__ = "Kento Masuda"
 __email__ = ""
@@ -13,3 +13,4 @@ from . import modelgrid
 from . import specfit
 from . import numpyro_model
 from . import ispec_synthetic_grid
+from . import infer
